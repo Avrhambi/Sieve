@@ -1,5 +1,6 @@
-# Claude Code — internal files
+# Claude Code — internal files (except project hook config)
 .claude/
+!.claude/settings.json
 *.claude
 .claude_cache/
 
@@ -66,5 +67,4 @@ Thumbs.db
 *.swp
 *.swo
 
-# Sieve runtime
-handoff/
+# Sieve runtime — handoff/ is tracked (inter-session API contracts)

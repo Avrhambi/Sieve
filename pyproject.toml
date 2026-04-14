@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "sieve"
+version = "0.1.0"
+description = "Sieve — context-aware coding assistant hook"
+authors = []
+readme = "README.md"
+packages = [{include = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+toml = "*"
+pydantic = ">=2.0"
+aiohttp = "*"
+watchdog = "*"
+tree-sitter = "*"
+tree-sitter-python = "*"
+tree-sitter-javascript = "*"
+rapidocr-onnxruntime = "*"
+mcp = "*"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "*"
+pytest-asyncio = "*"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
