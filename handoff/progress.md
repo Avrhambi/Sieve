@@ -47,3 +47,23 @@
 - **Output files:** src/visual/ocr_pipeline.py, src/visual/toaster.py, handoff/task-04-api.md
 - **Notes:** RapidOCR engine is lazy-initialised on first `extract_text()` call to keep import cost zero. `to_toast()` is pure: deduplicates lines, strips noise (blank lines, horizontal rules, box-drawing chars), prefixes each meaningful line with `•`. No VRAM-heavy imports anywhere in `src/visual/`. Config key `VRAM_THRESHOLD_MB` is read but only used for debug logging — the CPU path has no VRAM constraint.
 - **Blockers raised:** none
+
+---
+
+## TASK-06 | Background Daemon (Watcher & Processor)
+- **Status:** DONE
+- **Branch:** feat/task-06-daemon
+- **Merged:** PENDING
+- **Output files:** src/daemon/watcher.py, src/daemon/processor.py, src/daemon/heartbeat.py, handoff/task-06-api.md
+- **Notes:** watchdog Observer bridges OS events into asyncio via `call_soon_threadsafe`. .gitignore parsed with `fnmatch` (no extra deps). AST hash for Python uses stdlib `ast.dump()` — completely comment-free, so whitespace/comment-only saves never trigger `summarize()`. JS/TS/MD use skeletonised-output hash. Resource governors (RAM/VRAM) live entirely in `processor.py` — no import of private inference symbols. Heartbeat uses a single-row `daemon_heartbeat` table (id=1 constraint) in WAL mode; schema created on first write.
+- **Blockers raised:** none
+
+---
+
+## TASK-08 | MCP Server
+- **Status:** DONE
+- **Branch:** feat/task-08-mcp
+- **Merged:** YES
+- **Output files:** src/layers/logic_tracing.py, src/mcp/server.py, handoff/task-08-api.md
+- **Notes:** FastMCP used for tool registration. Two tools exposed: get_multi_hop_dependencies (recursive traversal with visited-set for cross-edges and stack-set for back-edges — circular refs labelled not recursed) and match_api_route (LIKE search on symbol_name and source_file columns). DB path is a module-level constant. Handoff file written retroactively by orchestrator session after task session omitted it.
+- **Blockers raised:** none
