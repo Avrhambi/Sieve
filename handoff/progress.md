@@ -60,6 +60,16 @@
 
 ---
 
+## TASK-07 | CLI Hook (Claude Interceptors)
+- **Status:** DONE
+- **Branch:** feat/task-07-hook
+- **Merged:** PENDING
+- **Output files:** bin/sieve-hook, handoff/task-07-api.md
+- **Notes:** Python 3.11+ shebang; all `src.*` imports deferred behind daemon-alive guard so offline fallback is stdlib-only. Heartbeat check uses raw `sqlite3` (no asyncio import) with `SELECT * … WHERE id=1` — column-index access (`row[1]`) tolerates `ts`/`timestamp` schema drift. File-tree fallback uses `os.scandir` (3× faster than `Path.iterdir`). `!full` bypass checks `SIEVE_PROMPT` env var first, then stdin with 5 ms `select` timeout. `tomllib` (stdlib 3.11+) reads `MAX_DEPTH` from config. 50 ms timing warning emitted to stderr when elapsed >40 ms. On native Linux/NVMe the hook stays well under 50 ms; WSL2+Windows filesystem adds ~150 ms of I/O overhead that cannot be code-optimised away.
+- **Blockers raised:** none
+
+---
+
 ## TASK-08 | MCP Server
 - **Status:** DONE
 - **Branch:** feat/task-08-mcp

@@ -1,2 +1,259 @@
-#!/usr/bin/env bash
-# sieve-hook stub — implemented in TASK-06
+#!/usr/bin/env python3
+"""bin/sieve-hook — Claude Code interceptor hook (UserPromptSubmit / PostCompact).
+
+Performance contract: <50ms total elapsed.  All src.* imports are deferred
+behind the daemon-alive guard so the fast offline fallback path stays pure
+stdlib.  The heartbeat check and file-tree heuristic use zero third-party code.
+"""
+# ── Timer starts before any import ──────────────────────────────────────────
+import time as _t
+_t0 = _t.perf_counter()
+
+import os
+import sys
+import sqlite3
+import argparse
+from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Constants (mirror src.daemon.heartbeat without importing it)
+# ---------------------------------------------------------------------------
+_STALE_THRESHOLD = 30.0          # seconds — matches STALE_THRESHOLD in heartbeat.py
+_HEARTBEAT_TIMEOUT = 0.3         # sqlite timeout for heartbeat read (seconds)
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_DB_PATH = _REPO_ROOT / "ledger.db"
+_SOURCE_EXTS = frozenset({".py", ".js", ".ts", ".tsx", ".jsx"})
+_IMG_EXTS = frozenset({".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif"})
+
+# ---------------------------------------------------------------------------
+# Arg parsing
+# ---------------------------------------------------------------------------
+_ap = argparse.ArgumentParser(add_help=False)
+_ap.add_argument("--mode", default="prompt", choices=["prompt", "compact"])
+_args, _ = _ap.parse_known_args()
+
+# ---------------------------------------------------------------------------
+# !full [path] bypass — exit 0 immediately; raw pass-through handled by Claude
+# ---------------------------------------------------------------------------
+def _check_full_bypass() -> bool:
+    if os.environ.get("SIEVE_PROMPT", "").startswith("!full "):
+        return True
+    if not sys.stdin.isatty():
+        try:
+            import select as _sel
+            ready, _, _ = _sel.select([sys.stdin], [], [], 0.005)
+            if ready:
+                data = sys.stdin.buffer.read()
+                try:
+                    import json as _j
+                    prompt = _j.loads(data).get("prompt", "")
+                except Exception:
+                    prompt = data.decode("utf-8", errors="replace")
+                if str(prompt).lstrip().startswith("!full "):
+                    return True
+        except Exception:
+            pass
+    return False
+
+
+if _check_full_bypass():
+    sys.exit(0)
+
+# ---------------------------------------------------------------------------
+# Daemon liveness — raw sqlite3, no src.* import
+# ---------------------------------------------------------------------------
+def _daemon_alive() -> bool:
+    """Return True iff the heartbeat row exists and is fresher than 30 s.
+
+    Uses SELECT * and index 1 to tolerate the 'ts' vs 'timestamp' column-name
+    discrepancy between heartbeat.py versions.
+    """
+    try:
+        conn = sqlite3.connect(str(_DB_PATH), timeout=_HEARTBEAT_TIMEOUT)
+        try:
+            # Skip WAL pragma here — we only read, and the daemon owns WAL setup.
+            row = conn.execute(
+                "SELECT * FROM daemon_heartbeat WHERE id = 1"
+            ).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return False
+        return (_t.time() - row[1]) < _STALE_THRESHOLD
+    except Exception:
+        return False
+
+# ---------------------------------------------------------------------------
+# File-tree heuristic fallback — pure stdlib, no src.* imports
+# ---------------------------------------------------------------------------
+def _file_tree_fallback(max_depth: int = 3) -> str:
+    """Walk cwd up to max_depth with os.scandir (faster than Path.iterdir)."""
+    cwd_str = str(Path.cwd().resolve())
+    lines = ["[sieve] daemon offline — file-tree heuristic", ""]
+
+    def _walk(d: str, depth: int) -> None:
+        if depth > max_depth:
+            return
+        try:
+            entries = sorted(os.scandir(d), key=lambda e: e.name)
+        except OSError:
+            return
+        for e in entries:
+            if e.name.startswith("."):
+                continue
+            if e.is_dir(follow_symlinks=False):
+                _walk(e.path, depth + 1)
+            elif os.path.splitext(e.name)[1] in _SOURCE_EXTS:
+                rel = e.path[len(cwd_str) + 1:] if e.path.startswith(cwd_str) else e.path
+                lines.append(f"  {rel}")
+
+    _walk(cwd_str, 0)
+    return "\n".join(lines)
+
+# ---------------------------------------------------------------------------
+# Config loader — reads TOML with stdlib (no pydantic / toml dep on this path)
+# ---------------------------------------------------------------------------
+def _load_max_depth() -> int:
+    """Read MAX_DEPTH from config without importing src.main."""
+    try:
+        import tomllib  # stdlib in Python 3.11+
+        cfg_path = _REPO_ROOT / "config" / "sieve.config.toml"
+        with open(cfg_path, "rb") as fh:
+            raw = tomllib.load(fh)
+        return int(raw["thresholds"]["MAX_DEPTH"])
+    except Exception:
+        return 3  # matches config default
+
+# ---------------------------------------------------------------------------
+# Ledger helpers — deferred import, only reached when daemon is alive
+# ---------------------------------------------------------------------------
+def _get_skeletons() -> str:
+    """Query context_cache for all non-ignored files under cwd."""
+    if str(_REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(_REPO_ROOT))
+
+    from src.data.ledger import Ledger, LedgerError  # noqa: PLC0415
+
+    cwd = str(Path.cwd())
+    sections: list[str] = []
+    try:
+        with Ledger() as ledger:
+            rows = ledger._conn.execute(
+                "SELECT path FROM ledger WHERE path LIKE ? AND is_ignored = 0",
+                (cwd.rstrip("/") + "/%",),
+            ).fetchall()
+            for (path,) in rows:
+                cache = ledger.get_cache(path)
+                if cache and cache["skeleton"]:
+                    try:
+                        rel = Path(path).relative_to(cwd)
+                    except ValueError:
+                        rel = Path(path).name
+                    sections.append(f"### {rel}\n{cache['skeleton']}")
+    except LedgerError as exc:
+        return f"[sieve] ledger locked ({exc})"
+    except Exception as exc:
+        return f"[sieve] ledger error ({exc})"
+
+    return "\n\n".join(sections) if sections else "[sieve] no cached skeletons in ledger"
+
+
+def _compact_skeleton() -> str:
+    """Re-inject full architectural skeleton (PostCompact mode)."""
+    if str(_REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(_REPO_ROOT))
+
+    from src.data.ledger import Ledger, LedgerError  # noqa: PLC0415
+
+    cwd = str(Path.cwd())
+    sections: list[str] = ["[sieve] architectural skeleton re-injection (post-compact)", ""]
+    try:
+        with Ledger() as ledger:
+            rows = ledger._conn.execute(
+                "SELECT path FROM ledger WHERE path LIKE ? AND is_ignored = 0 ORDER BY path",
+                (cwd.rstrip("/") + "/%",),
+            ).fetchall()
+            for (path,) in rows:
+                cache = ledger.get_cache(path)
+                if cache and cache["skeleton"]:
+                    try:
+                        rel = Path(path).relative_to(cwd)
+                    except ValueError:
+                        rel = Path(path).name
+                    sections.append(f"### {rel}\n{cache['skeleton']}")
+    except LedgerError as exc:
+        return f"[sieve] ledger locked — compact skeleton unavailable ({exc})"
+    except Exception as exc:
+        return f"[sieve] ledger error — compact skeleton unavailable ({exc})"
+
+    return "\n\n".join(sections) if len(sections) > 2 else "[sieve] no architectural skeleton available"
+
+# ---------------------------------------------------------------------------
+# Image cache processing — deferred import
+# ---------------------------------------------------------------------------
+def _process_images() -> str:
+    """Extract text from images in ~/.claude/image-cache/ and toast them."""
+    image_cache = Path.home() / ".claude" / "image-cache"
+    if not image_cache.exists():
+        return ""
+    images = [f for f in image_cache.iterdir() if f.suffix.lower() in _IMG_EXTS]
+    if not images:
+        return ""
+
+    if str(_REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(_REPO_ROOT))
+
+    try:
+        from src.visual.ocr_pipeline import extract_text  # noqa: PLC0415
+        from src.visual.toaster import to_toast  # noqa: PLC0415
+    except Exception:
+        return ""
+
+    toasts: list[str] = []
+    for img in images:
+        text = extract_text(img)
+        toast = to_toast(text)
+        if toast and toast != "(no content)":
+            toasts.append(f"[image: {img.name}]\n{toast}")
+    return "\n\n".join(toasts)
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+def main() -> None:
+    parts: list[str] = []
+
+    alive = _daemon_alive()
+
+    if _args.mode == "compact":
+        if alive:
+            parts.append(_compact_skeleton())
+        else:
+            parts.append(_file_tree_fallback(_load_max_depth()))
+    else:
+        # UserPromptSubmit
+        if alive:
+            result = _get_skeletons()
+            if result.startswith("[sieve] ledger"):
+                # DB locked / error → fail fast to heuristic
+                parts.append(_file_tree_fallback(_load_max_depth()))
+            else:
+                parts.append(result)
+        else:
+            parts.append(_file_tree_fallback(_load_max_depth()))
+
+    img = _process_images()
+    if img:
+        parts.append(img)
+
+    output = "\n\n".join(p for p in parts if p)
+    if output:
+        print(output)
+
+    elapsed_ms = (_t.perf_counter() - _t0) * 1000
+    if elapsed_ms > 40:
+        print(f"[sieve] WARN: hook took {elapsed_ms:.1f}ms (limit 50ms)", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()
