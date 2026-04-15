@@ -5,12 +5,19 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
 # On Windows (Git Bash), Python is installed as "python" not "python3".
-# Detect whichever is available.
-if command -v python3 &>/dev/null; then
-    PY=python3
-elif command -v python &>/dev/null; then
-    PY=python
-else
+# Try each candidate and pick the first one that actually returns a version.
+PY=""
+for candidate in python python3; do
+    if command -v "$candidate" &>/dev/null; then
+        ver=$("$candidate" --version 2>&1 | awk '{print $2}')
+        if [ -n "$ver" ]; then
+            PY="$candidate"
+            break
+        fi
+    fi
+done
+
+if [ -z "$PY" ]; then
     echo "ERROR: Python not found in PATH." >&2
     exit 1
 fi
