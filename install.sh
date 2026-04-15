@@ -4,13 +4,19 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
-echo "==> Checking Python version..."
-if ! command -v python3 &>/dev/null; then
-    echo "ERROR: python3 not found in PATH." >&2
+# On Windows (Git Bash), Python is installed as "python" not "python3".
+# Detect whichever is available.
+if command -v python3 &>/dev/null; then
+    PY=python3
+elif command -v python &>/dev/null; then
+    PY=python
+else
+    echo "ERROR: Python not found in PATH." >&2
     exit 1
 fi
 
-python_version=$(python3 --version 2>&1 | awk '{print $2}')
+echo "==> Checking Python version..."
+python_version=$($PY --version 2>&1 | awk '{print $2}')
 major=$(echo "$python_version" | cut -d. -f1)
 minor=$(echo "$python_version" | cut -d. -f2)
 
@@ -22,15 +28,21 @@ echo "    Python $python_version — OK"
 
 echo "==> Creating virtual environment..."
 if [ ! -d ".venv" ]; then
-    python3 -m venv .venv
+    $PY -m venv .venv
     echo "    Created .venv/"
 else
     echo "    .venv/ already exists — skipping"
 fi
 
 echo "==> Activating venv and installing dependencies..."
-# shellcheck disable=SC1091
-source .venv/bin/activate
+# Windows (Git Bash) uses Scripts/activate; Linux/Mac uses bin/activate
+if [ -f ".venv/Scripts/activate" ]; then
+    # shellcheck disable=SC1091
+    source .venv/Scripts/activate
+else
+    # shellcheck disable=SC1091
+    source .venv/bin/activate
+fi
 
 pip install --quiet --upgrade pip
 pip install --quiet \
@@ -69,7 +81,7 @@ fi
 echo "    Model ready"
 
 echo "==> Initialising SQLite WAL database..."
-PYTHONPATH="$REPO_ROOT" python3 -c "
+PYTHONPATH="$REPO_ROOT" $PY -c "
 import sys
 sys.path.insert(0, '.')
 from src.data.ledger import Ledger
@@ -82,4 +94,4 @@ echo "==> Making bin/sieve-hook executable..."
 chmod +x bin/sieve-hook
 
 echo ""
-echo "Sieve installed. Run: python3 src/main.py to start the daemon."
+echo "Sieve installed. Run: python src/main.py to start the daemon."
