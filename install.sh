@@ -61,9 +61,16 @@ python -m pip install --quiet \
     "tree-sitter-python>=0.23" \
     "tree-sitter-javascript>=0.23" \
     "tree-sitter-typescript>=0.23" \
-    "rapidocr-onnxruntime>=1.3" \
     "mcp>=1.0"
-echo "    Dependencies installed"
+echo "    Core dependencies installed"
+
+echo "==> Installing OCR dependency (optional — skip if Python >3.13)..."
+if python -m pip install --quiet "rapidocr-onnxruntime>=1.3" 2>/dev/null; then
+    echo "    rapidocr-onnxruntime installed"
+else
+    echo "    WARN: rapidocr-onnxruntime skipped (not yet compatible with your Python version)"
+    echo "         OCR screenshot features will be unavailable — all other features work normally"
+fi
 
 echo "==> Checking Ollama..."
 if ! command -v ollama &>/dev/null; then
