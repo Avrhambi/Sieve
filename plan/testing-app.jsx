@@ -393,11 +393,11 @@ for i in $(seq 1 10); do
   E=$(date +%s%N)
   MS=$(( (E-S)/1000000 ))
   [ $MS -gt $MAX ] && MAX=$MS
-  echo "Run $i: ${MS}ms$([ $MS -gt 50 ] && echo ' ← OVER LIMIT')"
+  echo "Run $i: \${MS}ms$([ $MS -gt 50 ] && echo ' ← OVER LIMIT')"
   [ $MS -gt 50 ] && OVER=$((OVER+1))
 done
 echo "---"
-echo "Peak: ${MAX}ms"
+echo "Peak: \${MAX}ms"
 [ $OVER -eq 0 ] && echo "PASS: All 10 runs under 50ms" || echo "FAIL: $OVER run(s) exceeded 50ms"`,
       timeout: 60,
       score: (out) => {
