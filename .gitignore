@@ -4,8 +4,10 @@
 *.claude
 .claude_cache/
 
-# Project planning docs (internal)
-plan/
+# Project planning docs (internal — md/docx/yml stay ignored, test tooling is tracked)
+plan/*.md
+plan/*.docx
+plan/*.yml
 
 # Python
 __pycache__/
