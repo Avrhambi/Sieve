@@ -8,6 +8,7 @@
 plan/*.md
 plan/*.docx
 plan/*.yml
+plan/node_modules/
 
 # Python
 __pycache__/
