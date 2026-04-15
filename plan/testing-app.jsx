@@ -484,27 +484,27 @@ async function callBackend(cmd, timeout = 60) {
 
 // ─── Small UI pieces ──────────────────────────────────────────────────────────
 const OutputPane = ({ output, status }) => (
-  <div className={`bg-[#0a0d14] rounded-lg border text-xs font-mono p-4 whitespace-pre-wrap overflow-auto max-h-72 leading-relaxed mt-3
-    ${status === 'pass' ? 'border-emerald-900' : status === 'fail' ? 'border-red-900' : status === 'warn' ? 'border-amber-900' : 'border-slate-800'}`}>
+  <div className={`rounded-xl border text-xs font-mono p-4 whitespace-pre-wrap overflow-auto max-h-80 leading-relaxed mt-4
+    ${status === 'pass' ? 'bg-emerald-950/20 border-emerald-800/50' : status === 'fail' ? 'bg-red-950/20 border-red-800/50' : status === 'warn' ? 'bg-amber-950/20 border-amber-800/50' : 'bg-slate-900/60 border-slate-700/50'}`}>
     {output
-      ? <span className="text-slate-300">{output}</span>
-      : <span className="text-slate-600 italic">No output yet — click Run</span>}
+      ? <span className="text-slate-200 leading-6">{output}</span>
+      : <span className="text-slate-500 italic">No output yet — click Run</span>}
   </div>
 );
 
 const Badge = ({ status, msg }) => {
   const s = {
-    pass:    'bg-emerald-500/10 text-emerald-400 border-emerald-700/50',
-    fail:    'bg-red-500/10    text-red-400    border-red-700/50',
-    warn:    'bg-amber-500/10  text-amber-400  border-amber-700/50',
-    better:  'bg-emerald-500/10 text-emerald-400 border-emerald-700/50',
-    same:    'bg-blue-500/10   text-blue-400   border-blue-700/50',
-    worse:   'bg-red-500/10    text-red-400    border-red-700/50',
-    partial: 'bg-purple-500/10 text-purple-400 border-purple-700/50',
+    pass:    'bg-emerald-500/15 text-emerald-300 border-emerald-600/50',
+    fail:    'bg-red-500/15     text-red-300     border-red-600/50',
+    warn:    'bg-amber-500/15   text-amber-300   border-amber-600/50',
+    better:  'bg-emerald-500/15 text-emerald-300 border-emerald-600/50',
+    same:    'bg-blue-500/15    text-blue-300    border-blue-600/50',
+    worse:   'bg-red-500/15     text-red-300     border-red-600/50',
+    partial: 'bg-purple-500/15  text-purple-300  border-purple-600/50',
   };
   const ic = { pass: '✓', fail: '✗', warn: '⚠', better: '↑', same: '=', worse: '↓', partial: '~' };
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium ${s[status] || 'bg-slate-800 text-slate-500 border-slate-700'}`}>
+    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg border text-xs font-semibold ${s[status] || 'bg-slate-800 text-slate-400 border-slate-600'}`}>
       {ic[status] || '○'} {msg || status || '—'}
     </span>
   );
@@ -515,7 +515,7 @@ const CopyBtn = ({ text, label = 'Copy' }) => {
   return (
     <button
       onClick={() => navigator.clipboard.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 2000); }).catch(() => {})}
-      className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 rounded-lg transition-colors shrink-0"
+      className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-600/50 hover:border-slate-500 text-xs text-slate-300 hover:text-white rounded-lg transition-all shrink-0"
     >
       {done ? <><Check size={11} className="text-emerald-400" /> Copied!</> : <><Copy size={11} /> {label}</>}
     </button>
@@ -526,51 +526,52 @@ const RunBtn = ({ onClick, running, label = 'Run' }) => (
   <button
     onClick={onClick}
     disabled={running}
-    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+    className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-xl shadow-lg shadow-blue-900/30 transition-all shrink-0"
   >
     {running
-      ? <><RefreshCw size={13} className="animate-spin" /> Running...</>
-      : <><Play size={13} /> {label}</>}
+      ? <><RefreshCw size={14} className="animate-spin" /> Running…</>
+      : <><Play size={14} /> {label}</>}
   </button>
 );
 
 // ─── Shell Test Card ──────────────────────────────────────────────────────────
 const ShellCard = ({ test, result, running, onRun }) => {
   const score = result?.score;
-  const borderColor = score?.status === 'pass' ? 'border-emerald-900/60'
-    : score?.status === 'fail' ? 'border-red-900/60'
-    : 'border-slate-800 hover:border-blue-500/20';
+  const borderColor = score?.status === 'pass' ? 'border-emerald-700/50 bg-emerald-950/10'
+    : score?.status === 'fail' ? 'border-red-700/50 bg-red-950/10'
+    : score?.status === 'warn' ? 'border-amber-700/40'
+    : 'border-slate-700/50 hover:border-slate-600/70';
 
   return (
-    <div className={`bg-[#11151d] border rounded-2xl p-6 transition-all ${borderColor}`}>
-      <div className="flex items-start justify-between gap-4 mb-3">
-        <div className="flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="font-semibold text-white text-base">{test.name}</h3>
+    <div className={`border rounded-2xl p-7 transition-all bg-slate-900/40 ${borderColor}`}>
+      <div className="flex items-start justify-between gap-4 mb-5">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-3 flex-wrap mb-2">
+            <h3 className="font-bold text-white text-base leading-tight">{test.name}</h3>
             {score && <Badge status={score.status} msg={score.msg} />}
           </div>
-          <p className="text-sm text-slate-400 mt-1">{test.description}</p>
+          <p className="text-sm text-slate-300 leading-relaxed">{test.description}</p>
           {test.prereq && (
-            <div className="mt-2 flex items-center gap-1.5 text-amber-400 text-xs">
-              <AlertCircle size={11} /> {test.prereq}
+            <div className="mt-3 flex items-center gap-2 text-amber-300 text-xs bg-amber-950/30 border border-amber-800/40 rounded-lg px-3 py-2">
+              <AlertCircle size={12} className="shrink-0" /> {test.prereq}
             </div>
           )}
         </div>
         <RunBtn onClick={onRun} running={running} />
       </div>
 
-      <div className="flex items-center justify-between mt-2 mb-1">
-        <span className="text-xs text-slate-600 font-mono">command</span>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Command</span>
         <CopyBtn text={test.cmd} />
       </div>
-      <pre className="text-xs text-slate-600 font-mono bg-black/20 rounded-lg px-3 py-2 overflow-x-auto max-h-12 whitespace-pre">
-        {test.cmd.split('\n')[0]}{test.cmd.includes('\n') ? '\n…' : ''}
+      <pre className="text-xs text-slate-300 font-mono bg-black/40 border border-slate-700/40 rounded-xl px-4 py-3 overflow-x-auto leading-relaxed">
+        {test.cmd.split('\n').slice(0, 3).join('\n')}{test.cmd.split('\n').length > 3 ? '\n…' : ''}
       </pre>
 
       {result?.output && <OutputPane output={result.output} status={score?.status} />}
       {result?.timestamp && (
-        <p className="text-xs text-slate-700 mt-2 flex items-center gap-1">
-          <Clock size={10} /> {new Date(result.timestamp).toLocaleTimeString()}
+        <p className="text-xs text-slate-500 mt-3 flex items-center gap-1.5">
+          <Clock size={11} /> Ran at {new Date(result.timestamp).toLocaleTimeString()}
         </p>
       )}
     </div>
@@ -595,14 +596,16 @@ const ABCard = ({ test, result, running, onSetup, onSaveText, onRunCode, onSetVe
     const labelColor = mode === 'modeA' ? 'text-slate-400' : 'text-blue-400';
 
     return (
-      <div className={`flex-1 min-w-0 border rounded-xl p-4 ${modeColor}`}>
-        <div className="flex items-center justify-between mb-3">
-          <span className={`text-xs font-bold uppercase tracking-wider ${labelColor}`}>{label}</span>
+      <div className={`flex-1 min-w-0 border rounded-2xl p-5 ${modeColor}`}>
+        <div className="flex items-center justify-between mb-4">
+          <span className={`text-xs font-bold uppercase tracking-widest ${labelColor}`}>{label}</span>
           <button
             onClick={() => onSetup(test.id, mode, mode === 'modeA' ? test.setupA : test.setupB)}
             disabled={running[`${test.id}-${mode}-setup`]}
-            className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg font-medium transition-colors
-              ${setupDone ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-700/40' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'}`}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg font-semibold border transition-all
+              ${setupDone
+                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-600/50'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-600/50 hover:border-slate-500'}`}
           >
             {running[`${test.id}-${mode}-setup`]
               ? <><RefreshCw size={11} className="animate-spin" /> Setting up…</>
@@ -613,16 +616,16 @@ const ABCard = ({ test, result, running, onSetup, onSaveText, onRunCode, onSetVe
         </div>
 
         {/* Prompt */}
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-xs text-slate-600">prompt</span>
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs text-slate-400 font-semibold uppercase tracking-wide">Prompt</span>
           <CopyBtn text={test.prompt} label="Copy prompt" />
         </div>
-        <div className="bg-black/30 rounded-lg p-2 mb-3">
-          <p className="text-xs text-slate-500 font-mono leading-relaxed line-clamp-3">{test.prompt}</p>
+        <div className="bg-black/40 border border-slate-700/40 rounded-xl p-3 mb-4">
+          <p className="text-sm text-slate-300 leading-relaxed line-clamp-4">{test.prompt}</p>
         </div>
 
         {/* Paste area */}
-        <label className="text-xs text-slate-500 mb-1 block">paste Claude's response:</label>
+        <label className="text-xs text-slate-400 font-semibold uppercase tracking-wide mb-2 block">Claude's Response</label>
         <textarea
           value={text}
           onChange={e => {
@@ -630,46 +633,46 @@ const ABCard = ({ test, result, running, onSetup, onSaveText, onRunCode, onSetVe
             onSaveText(test.id, mode, e.target.value);
           }}
           placeholder="Paste Claude's response here after sending the prompt…"
-          className="w-full bg-black/40 border border-slate-700/40 rounded-lg p-3 text-xs text-slate-300 font-mono h-32 resize-y focus:outline-none focus:border-blue-600/50 placeholder-slate-700"
+          className="w-full bg-black/40 border border-slate-700/50 rounded-xl p-3 text-sm text-slate-200 h-36 resize-y focus:outline-none focus:border-blue-500/70 focus:ring-1 focus:ring-blue-500/20 placeholder-slate-600 transition-all"
         />
 
         {/* For code tests: run button + output */}
         {test.type === 'ab-code' && text && (
-          <div className="mt-3">
+          <div className="mt-4">
             <button
               onClick={() => onRunCode(test.id, mode, test.runCode(text, mode === 'modeA' ? 'a' : 'b'), test.scoreCode, test.timeout)}
               disabled={running[`${test.id}-${mode}-code`]}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600/80 hover:bg-purple-500 text-white text-xs rounded-lg font-medium transition-colors"
+              className="flex items-center gap-2 px-4 py-2 bg-purple-700 hover:bg-purple-600 text-white text-xs rounded-xl font-semibold border border-purple-600/50 transition-all"
             >
               {running[`${test.id}-${mode}-code`]
                 ? <><RefreshCw size={11} className="animate-spin" /> Running code…</>
                 : <><Terminal size={11} /> Run Code</>}
             </button>
             {codeOut && <OutputPane output={codeOut} status={codeScore?.status} />}
-            {codeScore && <div className="mt-2"><Badge status={codeScore.status} msg={codeScore.msg} /></div>}
+            {codeScore && <div className="mt-3"><Badge status={codeScore.status} msg={codeScore.msg} /></div>}
           </div>
         )}
 
         {/* For precision tests: score button */}
         {test.type === 'ab-precision' && text && (
-          <div className="mt-3">
+          <div className="mt-4">
             <button
               onClick={() => onScorePrecision(test.id, mode, text, test.groundTruthCmd)}
               disabled={running[`${test.id}-${mode}-score`]}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600/80 hover:bg-purple-500 text-white text-xs rounded-lg font-medium transition-colors"
+              className="flex items-center gap-2 px-4 py-2 bg-purple-700 hover:bg-purple-600 text-white text-xs rounded-xl font-semibold border border-purple-600/50 transition-all"
             >
               {running[`${test.id}-${mode}-score`]
                 ? <><RefreshCw size={11} className="animate-spin" /> Scoring…</>
                 : <><BarChart3 size={11} /> Score precision/recall</>}
             </button>
             {result?.[mode]?.precision != null && (
-              <div className="mt-2 space-y-1 text-xs">
-                <div className="flex gap-4">
-                  <span className="text-slate-400">Precision: <span className="text-white font-mono">{(result[mode].precision * 100).toFixed(0)}%</span></span>
-                  <span className="text-slate-400">Recall: <span className="text-white font-mono">{(result[mode].recall * 100).toFixed(0)}%</span></span>
+              <div className="mt-3 space-y-2 text-sm">
+                <div className="flex gap-6">
+                  <span className="text-slate-400">Precision: <span className="text-white font-mono font-bold">{(result[mode].precision * 100).toFixed(0)}%</span></span>
+                  <span className="text-slate-400">Recall: <span className="text-white font-mono font-bold">{(result[mode].recall * 100).toFixed(0)}%</span></span>
                 </div>
-                {result[mode].missing?.length > 0 && <p className="text-red-400">Missing: {result[mode].missing.join(', ')}</p>}
-                {result[mode].extra?.length > 0 && <p className="text-amber-400">Hallucinated: {result[mode].extra.join(', ')}</p>}
+                {result[mode].missing?.length > 0 && <p className="text-red-300 text-xs">Missing: {result[mode].missing.join(', ')}</p>}
+                {result[mode].extra?.length > 0 && <p className="text-amber-300 text-xs">Hallucinated: {result[mode].extra.join(', ')}</p>}
                 <Badge status={result[mode].precStatus} msg={result[mode].precStatus === 'pass' ? 'P≥80% R≥80%' : result[mode].precStatus === 'partial' ? 'R≥50%' : 'Low recall'} />
               </div>
             )}
@@ -678,7 +681,7 @@ const ABCard = ({ test, result, running, onSetup, onSaveText, onRunCode, onSetVe
 
         {/* Auto keyword highlight */}
         {test.autoScore && text && mode === 'modeB' && (
-          <div className="mt-2 text-xs text-slate-500">
+          <div className="mt-3">
             {autoScore && <Badge status={autoScore} msg={autoScore.charAt(0).toUpperCase() + autoScore.slice(1)} />}
           </div>
         )}
@@ -687,16 +690,16 @@ const ABCard = ({ test, result, running, onSetup, onSaveText, onRunCode, onSetVe
   };
 
   return (
-    <div className="bg-[#11151d] border border-slate-800 hover:border-blue-500/20 rounded-2xl p-6 transition-all">
-      <div className="mb-4">
-        <div className="flex items-center gap-2 flex-wrap mb-1">
-          <h3 className="font-semibold text-white text-base">{test.name}</h3>
+    <div className="border border-slate-700/50 hover:border-slate-600/70 rounded-2xl p-7 transition-all bg-slate-900/40">
+      <div className="mb-5">
+        <div className="flex items-center gap-3 flex-wrap mb-2">
+          <h3 className="font-bold text-white text-base leading-tight">{test.name}</h3>
           {verdict && <Badge status={verdict} msg={verdict.charAt(0).toUpperCase() + verdict.slice(1)} />}
         </div>
-        <p className="text-sm text-slate-400">{test.description}</p>
+        <p className="text-sm text-slate-300 leading-relaxed">{test.description}</p>
         {test.note && (
-          <div className="mt-1 flex items-center gap-1.5 text-amber-400 text-xs">
-            <AlertCircle size={11} /> {test.note}
+          <div className="mt-3 flex items-center gap-2 text-amber-300 text-xs bg-amber-950/30 border border-amber-800/40 rounded-lg px-3 py-2">
+            <AlertCircle size={12} className="shrink-0" /> {test.note}
           </div>
         )}
       </div>
@@ -724,24 +727,24 @@ const ABCard = ({ test, result, running, onSetup, onSaveText, onRunCode, onSetVe
       </div>
 
       {/* Comparison footer */}
-      <div className="mt-4 pt-4 border-t border-slate-800 flex items-center justify-between flex-wrap gap-3">
-        <div className="text-xs text-slate-500">
-          <span className="font-medium text-slate-400">Ground truth:</span> {test.groundTruth}
+      <div className="mt-5 pt-5 border-t border-slate-700/50 flex items-center justify-between flex-wrap gap-4">
+        <div className="text-sm text-slate-400 flex-1 min-w-0">
+          <span className="font-semibold text-slate-300">Expected: </span>{test.groundTruth}
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-slate-500">Manual verdict:</span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Verdict:</span>
           {['better', 'same', 'worse'].map(v => (
             <button
               key={v}
               onClick={() => onSetVerdict(test.id, v)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors border
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border
                 ${result?.verdict === v
-                  ? v === 'better' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-700/50'
-                    : v === 'same' ? 'bg-blue-500/20 text-blue-400 border-blue-700/50'
-                    : 'bg-red-500/20 text-red-400 border-red-700/50'
-                  : 'bg-slate-800 text-slate-500 border-slate-700 hover:border-slate-600'}`}
+                  ? v === 'better' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-600/50'
+                    : v === 'same' ? 'bg-blue-500/20 text-blue-300 border-blue-600/50'
+                    : 'bg-red-500/20 text-red-300 border-red-600/50'
+                  : 'bg-slate-800 text-slate-400 border-slate-600/50 hover:bg-slate-700 hover:text-slate-200 hover:border-slate-500'}`}
             >
-              {v}
+              {v === 'better' ? '↑ Better' : v === 'same' ? '= Same' : '↓ Worse'}
             </button>
           ))}
         </div>
@@ -765,30 +768,37 @@ const Dashboard = ({ tests, results }) => {
     else counts.notRun++;
   });
 
+  const total = tests.length;
+  const done = counts.pass + counts.fail + counts.warn;
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+
   return (
-    <div className="space-y-6">
-      <h2 className="text-2xl font-bold text-white">Dashboard</h2>
+    <div className="space-y-8">
+      <div>
+        <h2 className="text-2xl font-bold text-white mb-1">Dashboard</h2>
+        <p className="text-sm text-slate-400">{done} of {total} tests run ({pct}% complete)</p>
+      </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: 'Pass / Better', count: counts.pass,   color: 'text-emerald-400', bg: 'bg-emerald-500/5 border-emerald-900' },
-          { label: 'Fail / Worse',  count: counts.fail,   color: 'text-red-400',     bg: 'bg-red-500/5 border-red-900' },
-          { label: 'Warn / Same',   count: counts.warn,   color: 'text-amber-400',   bg: 'bg-amber-500/5 border-amber-900' },
-          { label: 'Not Run',       count: counts.notRun, color: 'text-slate-500',   bg: 'bg-slate-800/30 border-slate-800' },
+          { label: 'Pass / Better', count: counts.pass,   color: 'text-emerald-300', bg: 'bg-emerald-500/10 border-emerald-700/50' },
+          { label: 'Fail / Worse',  count: counts.fail,   color: 'text-red-300',     bg: 'bg-red-500/10 border-red-700/50' },
+          { label: 'Warn / Same',   count: counts.warn,   color: 'text-amber-300',   bg: 'bg-amber-500/10 border-amber-700/50' },
+          { label: 'Not Run',       count: counts.notRun, color: 'text-slate-400',   bg: 'bg-slate-800/50 border-slate-700/50' },
         ].map(c => (
-          <div key={c.label} className={`rounded-2xl border p-5 ${c.bg}`}>
-            <div className={`text-3xl font-bold mb-1 ${c.color}`}>{c.count}</div>
-            <div className="text-xs text-slate-500">{c.label}</div>
+          <div key={c.label} className={`rounded-2xl border p-6 ${c.bg}`}>
+            <div className={`text-4xl font-bold mb-2 ${c.color}`}>{c.count}</div>
+            <div className="text-sm text-slate-400 font-medium">{c.label}</div>
           </div>
         ))}
       </div>
-      <div className="rounded-2xl border border-slate-800 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-800/40 text-xs uppercase text-slate-500">
+      <div className="rounded-2xl border border-slate-700/50 overflow-hidden">
+        <table className="w-full">
+          <thead className="bg-slate-800/60 text-xs font-semibold uppercase tracking-wider text-slate-400">
             <tr>
-              <th className="px-4 py-3 text-left">Test</th>
-              <th className="px-4 py-3 text-left">Phase</th>
-              <th className="px-4 py-3 text-left">Status</th>
-              <th className="px-4 py-3 text-left">Detail</th>
+              <th className="px-5 py-3.5 text-left">Test</th>
+              <th className="px-5 py-3.5 text-left">Phase</th>
+              <th className="px-5 py-3.5 text-left">Status</th>
+              <th className="px-5 py-3.5 text-left hidden md:table-cell">Detail</th>
             </tr>
           </thead>
           <tbody>
@@ -799,13 +809,13 @@ const Dashboard = ({ tests, results }) => {
                 : r?.autoScore ? { status: r.autoScore, msg: `Auto: ${r.autoScore}` }
                 : null;
               return (
-                <tr key={t.id} className="border-t border-slate-800/50 hover:bg-slate-800/10">
-                  <td className="px-4 py-2 text-slate-300 text-xs">{t.name}</td>
-                  <td className="px-4 py-2 text-slate-500 text-xs">{PHASES.find(p => p.id === t.phase)?.label}</td>
-                  <td className="px-4 py-2">
-                    {score ? <Badge status={score.status} msg="" /> : <span className="text-slate-700 text-xs">—</span>}
+                <tr key={t.id} className="border-t border-slate-800/50 hover:bg-slate-800/20 transition-colors">
+                  <td className="px-5 py-3 text-slate-200 text-sm font-medium">{t.name}</td>
+                  <td className="px-5 py-3 text-slate-400 text-xs">{PHASES.find(p => p.id === t.phase)?.label}</td>
+                  <td className="px-5 py-3">
+                    {score ? <Badge status={score.status} msg="" /> : <span className="text-slate-600 text-xs">not run</span>}
                   </td>
-                  <td className="px-4 py-2 text-slate-500 text-xs">{score?.msg || '—'}</td>
+                  <td className="px-5 py-3 text-slate-400 text-xs hidden md:table-cell">{score?.msg || '—'}</td>
                 </tr>
               );
             })}
@@ -976,18 +986,18 @@ export default function App() {
         </div>
 
         {/* Backend status */}
-        <div className={`mx-4 mb-3 px-3 py-2 rounded-lg flex items-center gap-2 text-xs font-medium
-          ${backendStatus === 'online' ? 'bg-emerald-500/5 text-emerald-400 border border-emerald-900' : 'bg-red-500/5 text-red-400 border border-red-900'}`}>
-          {backendStatus === 'online' ? <Wifi size={12} /> : <WifiOff size={12} />}
-          Backend {backendStatus === 'online' ? 'online' : 'offline — start server.py'}
+        <div className={`mx-4 mb-4 px-3 py-2.5 rounded-xl flex items-center gap-2 text-xs font-semibold border
+          ${backendStatus === 'online' ? 'bg-emerald-500/10 text-emerald-300 border-emerald-700/50' : backendStatus === 'checking' ? 'bg-slate-800/50 text-slate-400 border-slate-700/50' : 'bg-red-500/10 text-red-300 border-red-700/50'}`}>
+          {backendStatus === 'online' ? <Wifi size={13} /> : <WifiOff size={13} />}
+          {backendStatus === 'online' ? 'Backend online' : backendStatus === 'checking' ? 'Checking backend…' : 'Backend offline — run server.py'}
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 overflow-y-auto px-3 space-y-0.5">
+        <nav className="flex-1 overflow-y-auto px-3 space-y-1">
           <button
             onClick={() => { setActivePhase(-1); setMobileOpen(false); }}
-            className={`w-full flex items-center gap-3 p-3 rounded-xl text-sm transition-colors
-              ${activePhase === -1 ? 'bg-blue-500/10 text-blue-400' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'}`}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all
+              ${activePhase === -1 ? 'bg-blue-500/15 text-blue-300 border border-blue-700/40' : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'}`}
           >
             <BarChart3 size={16} /> Dashboard
           </button>
@@ -998,8 +1008,8 @@ export default function App() {
               <button
                 key={ph.id}
                 onClick={() => { setActivePhase(ph.id); setMobileOpen(false); }}
-                className={`w-full flex items-center justify-between p-3 rounded-xl text-sm transition-colors
-                  ${activePhase === ph.id ? 'bg-blue-500/10 text-blue-400' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'}`}
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all
+                  ${activePhase === ph.id ? 'bg-blue-500/15 text-blue-300 border border-blue-700/40' : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'}`}
               >
                 <div className="flex items-center gap-3">
                   <Icon size={15} />
@@ -1007,8 +1017,8 @@ export default function App() {
                 </div>
                 {prog > 0 && (
                   prog === 100
-                    ? <CheckCircle2 size={14} className="text-emerald-500" />
-                    : <span className="text-xs font-mono bg-slate-800 px-1.5 py-0.5 rounded-full">{prog}%</span>
+                    ? <CheckCircle2 size={15} className="text-emerald-400" />
+                    : <span className="text-xs font-bold bg-blue-500/15 text-blue-400 px-2 py-0.5 rounded-full">{prog}%</span>
                 )}
               </button>
             );
@@ -1019,7 +1029,7 @@ export default function App() {
         <div className="p-4 border-t border-slate-800">
           <button
             onClick={() => { if (confirm('Reset all test results?')) setResults({}); }}
-            className="w-full flex items-center justify-center gap-2 py-2 bg-slate-800 hover:bg-red-900/30 text-slate-400 hover:text-red-400 rounded-lg text-xs transition-colors"
+            className="w-full flex items-center justify-center gap-2 py-2.5 bg-slate-800/80 hover:bg-red-900/40 text-slate-400 hover:text-red-300 border border-slate-700/50 hover:border-red-800/50 rounded-xl text-xs font-medium transition-all"
           >
             <Trash2 size={12} /> Reset all results
           </button>
@@ -1028,13 +1038,13 @@ export default function App() {
 
       {/* Main */}
       <main className="flex-1 overflow-y-auto h-screen pt-14 md:pt-0">
-        <div className="max-w-5xl mx-auto p-5 md:p-8 pb-24 space-y-5">
+        <div className="max-w-5xl mx-auto p-5 md:p-8 pb-24 space-y-6">
           {activePhase === -1 ? (
             <Dashboard tests={tests} results={results} />
           ) : (
             <>
-              <div className="flex items-center gap-3 mb-2">
-                {(() => { const Icon = PHASES.find(p => p.id === activePhase)?.icon || Play; return <Icon size={18} className="text-blue-400" />; })()}
+              <div className="flex items-center gap-3 pb-2 border-b border-slate-800">
+                {(() => { const Icon = PHASES.find(p => p.id === activePhase)?.icon || Play; return <Icon size={20} className="text-blue-400" />; })()}
                 <h2 className="text-xl font-bold text-white">
                   Phase {activePhase} · {PHASES.find(p => p.id === activePhase)?.label}
                 </h2>
