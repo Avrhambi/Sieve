@@ -483,7 +483,7 @@ async function callBackend(cmd, timeout = 60) {
 }
 
 // ─── Small UI pieces ──────────────────────────────────────────────────────────
-const Terminal = ({ output, status }) => (
+const OutputPane = ({ output, status }) => (
   <div className={`bg-[#0a0d14] rounded-lg border text-xs font-mono p-4 whitespace-pre-wrap overflow-auto max-h-72 leading-relaxed mt-3
     ${status === 'pass' ? 'border-emerald-900' : status === 'fail' ? 'border-red-900' : status === 'warn' ? 'border-amber-900' : 'border-slate-800'}`}>
     {output
@@ -567,7 +567,7 @@ const ShellCard = ({ test, result, running, onRun }) => {
         {test.cmd.split('\n')[0]}{test.cmd.includes('\n') ? '\n…' : ''}
       </pre>
 
-      {result?.output && <Terminal output={result.output} status={score?.status} />}
+      {result?.output && <OutputPane output={result.output} status={score?.status} />}
       {result?.timestamp && (
         <p className="text-xs text-slate-700 mt-2 flex items-center gap-1">
           <Clock size={10} /> {new Date(result.timestamp).toLocaleTimeString()}
@@ -645,7 +645,7 @@ const ABCard = ({ test, result, running, onSetup, onSaveText, onRunCode, onSetVe
                 ? <><RefreshCw size={11} className="animate-spin" /> Running code…</>
                 : <><Terminal size={11} /> Run Code</>}
             </button>
-            {codeOut && <Terminal output={codeOut} status={codeScore?.status} />}
+            {codeOut && <OutputPane output={codeOut} status={codeScore?.status} />}
             {codeScore && <div className="mt-2"><Badge status={codeScore.status} msg={codeScore.msg} /></div>}
           </div>
         )}
