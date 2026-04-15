@@ -250,7 +250,7 @@ async def process_file(path: Path, queue: asyncio.Queue) -> None:
             # Symbol extraction and upsert.
             symbols = _extract_symbols(source, path_str, lang)
             for sym_name, refs in symbols:
-                ledger.upsert_symbol(path_str, sym_name, json.dumps(refs))
+                ledger.upsert_symbol(sym_name, path_str, refs)
 
             logger.info("Cache updated: %s", path)
 
