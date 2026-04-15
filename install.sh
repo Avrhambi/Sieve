@@ -73,26 +73,31 @@ else
 fi
 
 echo "==> Checking Ollama..."
-if ! command -v ollama &>/dev/null; then
-    echo ""
-    echo "ERROR: Ollama is not installed." >&2
-    echo "  Install it from: https://ollama.com/download" >&2
-    echo "  Then re-run this script." >&2
-    exit 1
+# On Windows, Ollama is a system tray app and may not be on Git Bash PATH.
+# Check PATH first, then common Windows install locations.
+OLLAMA_CMD=""
+if command -v ollama &>/dev/null; then
+    OLLAMA_CMD="ollama"
+elif [ -f "$LOCALAPPDATA/Programs/Ollama/ollama.exe" ]; then
+    OLLAMA_CMD="$LOCALAPPDATA/Programs/Ollama/ollama.exe"
+elif [ -f "/c/Users/$USERNAME/AppData/Local/Programs/Ollama/ollama.exe" ]; then
+    OLLAMA_CMD="/c/Users/$USERNAME/AppData/Local/Programs/Ollama/ollama.exe"
 fi
-echo "    Ollama found"
 
-echo "==> Pulling model qwen2.5-coder:1.5b (this may take a few minutes)..."
-ollama pull qwen2.5-coder:1.5b
-echo "Verifying Ollama model..."
-if ollama run qwen2.5-coder:1.5b "ping" 2>&1 | grep -q "."; then
-    echo "Model OK"
+if [ -z "$OLLAMA_CMD" ]; then
+    echo "    WARN: Ollama not found — LLM summaries will use heuristic fallback."
+    echo "         Install from https://ollama.com/download for full functionality."
 else
-    echo "ERROR: Model verification failed — the pull may be incomplete or corrupted."
-    echo "Re-run install.sh to retry."
-    exit 1
+    echo "    Ollama found: $OLLAMA_CMD"
+    echo "==> Pulling model qwen2.5-coder:1.5b (this may take a few minutes)..."
+    "$OLLAMA_CMD" pull qwen2.5-coder:1.5b
+    echo "Verifying Ollama model..."
+    if "$OLLAMA_CMD" run qwen2.5-coder:1.5b "ping" 2>&1 | grep -q "."; then
+        echo "    Model OK"
+    else
+        echo "    WARN: Model verification failed — re-run install.sh to retry."
+    fi
 fi
-echo "    Model ready"
 
 echo "==> Initialising SQLite WAL database..."
 PYTHONPATH="$REPO_ROOT" $PY -c "
