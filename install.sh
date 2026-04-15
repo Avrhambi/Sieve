@@ -34,15 +34,16 @@ source .venv/bin/activate
 
 pip install --quiet --upgrade pip
 pip install --quiet \
-    toml \
-    pydantic \
-    aiohttp \
-    watchdog \
-    tree-sitter \
-    tree-sitter-python \
-    tree-sitter-javascript \
-    rapidocr-onnxruntime \
-    mcp
+    "toml>=0.10" \
+    "pydantic>=2.0" \
+    "aiohttp>=3.9" \
+    "watchdog>=4.0" \
+    "tree-sitter>=0.25" \
+    "tree-sitter-python>=0.23" \
+    "tree-sitter-javascript>=0.23" \
+    "tree-sitter-typescript>=0.23" \
+    "rapidocr-onnxruntime>=1.3" \
+    "mcp>=1.0"
 echo "    Dependencies installed"
 
 echo "==> Checking Ollama..."

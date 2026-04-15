@@ -190,3 +190,11 @@ class Ledger:
         if row is None:
             return []
         return json.loads(row["references"])  # noqa: RUF100
+
+    def get_files_under(self, path_prefix: str) -> list[sqlite3.Row]:
+        """Return all non-ignored ledger rows whose path starts with path_prefix."""
+        prefix = path_prefix.rstrip("/") + "/"
+        return self._conn.execute(
+            "SELECT path FROM ledger WHERE path LIKE ? AND is_ignored = 0",
+            (prefix + "%",),
+        ).fetchall()

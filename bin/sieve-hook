@@ -63,23 +63,19 @@ if _check_full_bypass():
 # Daemon liveness — raw sqlite3, no src.* import
 # ---------------------------------------------------------------------------
 def _daemon_alive() -> bool:
-    """Return True iff the heartbeat row exists and is fresher than 30 s.
-
-    Uses SELECT * and index 1 to tolerate the 'ts' vs 'timestamp' column-name
-    discrepancy between heartbeat.py versions.
-    """
+    """Return True iff the heartbeat row exists and is fresher than 30 s."""
     try:
         conn = sqlite3.connect(str(_DB_PATH), timeout=_HEARTBEAT_TIMEOUT)
         try:
             # Skip WAL pragma here — we only read, and the daemon owns WAL setup.
             row = conn.execute(
-                "SELECT * FROM daemon_heartbeat WHERE id = 1"
+                "SELECT ts FROM daemon_heartbeat WHERE id = 1"
             ).fetchone()
         finally:
             conn.close()
         if row is None:
             return False
-        return (_t.time() - row[1]) < _STALE_THRESHOLD
+        return (_t.time() - row[0]) < _STALE_THRESHOLD
     except Exception:
         return False
 
@@ -138,10 +134,7 @@ def _get_skeletons() -> str:
     sections: list[str] = []
     try:
         with Ledger() as ledger:
-            rows = ledger._conn.execute(
-                "SELECT path FROM ledger WHERE path LIKE ? AND is_ignored = 0",
-                (cwd.rstrip("/") + "/%",),
-            ).fetchall()
+            rows = ledger.get_files_under(cwd)
             for (path,) in rows:
                 cache = ledger.get_cache(path)
                 if cache and cache["skeleton"]:
@@ -169,10 +162,7 @@ def _compact_skeleton() -> str:
     sections: list[str] = ["[sieve] architectural skeleton re-injection (post-compact)", ""]
     try:
         with Ledger() as ledger:
-            rows = ledger._conn.execute(
-                "SELECT path FROM ledger WHERE path LIKE ? AND is_ignored = 0 ORDER BY path",
-                (cwd.rstrip("/") + "/%",),
-            ).fetchall()
+            rows = ledger.get_files_under(cwd)
             for (path,) in rows:
                 cache = ledger.get_cache(path)
                 if cache and cache["skeleton"]:
