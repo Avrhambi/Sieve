@@ -51,8 +51,8 @@ else
     source .venv/bin/activate
 fi
 
-pip install --quiet --upgrade pip
-pip install --quiet \
+python -m pip install --quiet --upgrade pip
+python -m pip install --quiet \
     "toml>=0.10" \
     "pydantic>=2.0" \
     "aiohttp>=3.9" \
