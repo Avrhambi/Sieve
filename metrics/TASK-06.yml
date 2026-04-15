@@ -1,0 +1,59 @@
+session_metadata:
+  timestamp: 2026-04-14
+  task_id: "TASK-06"
+  task_objective: "Background daemon — file watcher, processor queue, AST hash gate, resource governor, heartbeat writer"
+  note: "Reconstructed from git commits a767d73, 378ab3f. First attempt produced stubs only; session was re-run."
+
+cli_stats:
+  user_prompts: 6
+  manual_corrections: 3
+  total_turns: 14
+  linter_fixes: 2
+  test_failures: 2
+  file_reads: 8
+  shell_commands: 9
+
+analysis:
+  prompt_clarity_score: 6/10
+  correction_ratio: 0.50
+  primary_bottleneck: >
+    First session produced stub implementations with no logic — functions existed but bodies
+    were placeholders. The session completed without flagging this, and the output was committed
+    before the stub was caught. Required a full re-run of the session.
+  lesson_learned: >
+    Integration sessions (those that connect 3+ upstream modules) are the highest-risk sessions
+    in a parallel build. They have the most surface area, the most possible import paths,
+    and the highest chance of producing plausible-looking stubs that pass structure checks
+    but fail functional tests. For these sessions: (1) require the session to run a smoke test
+    before reporting done, (2) add a done-criterion that checks for stub-like patterns
+    ('if the file contains the word "stub" or "pass" as a body, it is not done'),
+    (3) spot-check the output manually before merging.
+
+generalized_principles:
+  - principle: "Require smoke tests as done-criteria for integration sessions"
+    why: >
+      A session that writes syntactically valid stubs can satisfy all structural done-criteria
+      without implementing any logic. A smoke test (e.g., 'run the module and verify it
+      produces output') catches this. Add it to the done-criteria, not as a suggestion.
+    applies_to: "Any integration or orchestration session in a multi-session build"
+
+  - principle: "Manual spot-check before merging high-risk sessions"
+    why: >
+      Integration sessions have high blast radius — their bugs cascade into downstream sessions.
+      A 2-minute manual review of the key functions (not just the file structure) catches
+      stub-pattern implementations that automated checks miss.
+    applies_to: "Sessions implementing the 'glue' between 3+ upstream modules"
+
+  - principle: "Session re-runs are faster than debugging broken integration output"
+    why: >
+      When an integration session produces stubs, it is usually faster to re-run the session
+      with a more explicit prompt than to debug the partial output. Partial implementations
+      often have hidden assumptions baked in that a fresh session won't carry.
+    applies_to: "Any multi-session build with parallelized execution"
+
+  - principle: "Async bridging between threads requires explicit documentation in the prompt"
+    why: >
+      Threading-to-async bridges (e.g., calling asyncio from a watchdog thread via
+      call_soon_threadsafe) are non-obvious and easy to get wrong. Sessions without explicit
+      guidance will use blocking calls or spawn new event loops. Describe the exact pattern.
+    applies_to: "Any session mixing async coroutines with OS thread callbacks"

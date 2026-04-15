@@ -1,0 +1,54 @@
+session_metadata:
+  timestamp: 2026-04-14
+  task_id: "TASK-08"
+  task_objective: "MCP server — two tools exposed via FastMCP: multi-hop dependency graph traversal, route-to-handler matching"
+  note: "Reconstructed from git commit 7b0c0fc"
+
+cli_stats:
+  user_prompts: 4
+  manual_corrections: 1
+  total_turns: 9
+  linter_fixes: 1
+  test_failures: 0
+  file_reads: 5
+  shell_commands: 4
+
+analysis:
+  prompt_clarity_score: 7/10
+  correction_ratio: 0.25
+  primary_bottleneck: >
+    The MCP tools query symbol_index, but symbol_index was never populated by the daemon
+    (ISSUE-01). The session implemented the tools correctly against the schema — the tools
+    are structurally correct — but they silently return empty results on any live system
+    because the data they depend on is never written. The dependency between TASK-08
+    (consumer) and the symbol extractor (never implemented) was not surfaced in the prompt.
+  lesson_learned: >
+    When a session implements a query layer over data that a separate component must populate,
+    the session prompt must explicitly state: 'Component X writes this data. Verify in your
+    done-criteria that X is implemented. If X is not implemented, mark this as BLOCKED.'
+    A tool that queries an empty table and returns empty results is not obviously broken —
+    it passes all structural tests and looks correct until you run it in production.
+
+generalized_principles:
+  - principle: "Query-layer sessions must verify their data source is populated"
+    why: >
+      A session that implements a read-only query layer has no way to test it unless the
+      write layer exists and has populated data. If the write layer is not yet implemented,
+      the query layer session should be deferred or should explicitly note 'integration test
+      pending — data source not yet implemented.'
+    applies_to: "Any session implementing a query, search, or analytics layer over data written by another module"
+
+  - principle: "Circular dependency detection in graph traversal requires two sets, not one"
+    why: >
+      A single 'visited' set prevents re-expanding already-seen nodes but does not detect
+      cycles. A cycle requires a 'stack' set (nodes on the current recursion path). Without
+      the stack set, a cycle causes infinite recursion. Always use visited + stack for
+      graph traversal.
+    applies_to: "Any session implementing recursive dependency or graph traversal"
+
+  - principle: "MCP tool input/output schemas must be finalized before implementation"
+    why: >
+      Claude Code and other MCP clients parse the tool schema at registration time. A tool
+      whose input schema changes after client integration requires the client to be restarted
+      or reconfigured. Finalize the schema in the handoff API file before the MCP session starts.
+    applies_to: "Any session implementing MCP tools, REST APIs, or gRPC services"

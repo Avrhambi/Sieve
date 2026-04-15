@@ -11,16 +11,20 @@ Key guarantees
 """
 from __future__ import annotations
 
+import ast
 import asyncio
 import hashlib
+import json
 import logging
+import re
 import subprocess
 from pathlib import Path
 
 from src.core.skeletonizer import skeletonize
 from src.core.inference import summarize
 from src.data.ledger import Ledger, LedgerError
-from src.daemon.watcher import get_queue
+import src.main as _main_module
+from src.daemon.watcher import get_queue, _load_gitignore_patterns, _is_ignored
 from src.main import load_config
 
 logger = logging.getLogger(__name__)
@@ -112,19 +116,69 @@ def _compute_ast_hash(source: bytes, ext: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Symbol extraction
+# ---------------------------------------------------------------------------
+
+def _extract_symbols(source: bytes, path: str, lang: str) -> list[tuple[str, list[str]]]:
+    """Return a list of (symbol_name, references) tuples for the given source.
+
+    * Python: uses ast.parse to collect function/class definitions and imports.
+    * JS/TS: uses regex to collect function/class/const/let/var names and imports.
+    * Other: returns [].
+    """
+    ext = Path(path).suffix.lower()
+
+    if ext == ".py":
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            return []
+
+        imports: list[str] = []
+        symbols: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                symbols.append(node.name)
+            elif isinstance(node, ast.Import):
+                imports += [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                if node.module:
+                    imports.append(node.module)
+
+        return [(sym, imports) for sym in symbols]
+
+    if ext in (".js", ".ts", ".jsx", ".tsx"):
+        text = source.decode("utf-8", errors="ignore")
+        refs = re.findall(r"import\s+.*?\s+from\s+['\"]([^'\"]+)['\"]", text)
+        names = re.findall(r"(?:function|class|const|let|var)\s+(\w+)", text)
+        return [(name, refs) for name in names]
+
+    return []
+
+
+# ---------------------------------------------------------------------------
+# Module-level gitignore state (populated by start_processor)
+# ---------------------------------------------------------------------------
+
+_gitignore_patterns: list[str] = []
+_repo_root: Path | None = None
+
+
+# ---------------------------------------------------------------------------
 # Core processing logic
 # ---------------------------------------------------------------------------
 
-async def process_file(path: Path) -> None:
+async def process_file(path: Path, queue: asyncio.Queue) -> None:
     """Process a single changed file — update ledger and context_cache.
 
     Decision tree:
 
     1. File gone or extension not supported → skip.
-    2. Resources below threshold → skip (caller will requeue or drop).
-    3. File exceeds ``MAX_FILE_SIZE_KB`` → skip.
-    4. AST hash unchanged → upsert mtime only, skip ``summarize()``.
-    5. AST hash changed (or new file) → skeletonize + summarize, upsert both.
+    2. File matches gitignore patterns → mark ignored in ledger, skip.
+    3. Resources below threshold → re-enqueue after delay.
+    4. File exceeds ``MAX_FILE_SIZE_KB`` → skip.
+    5. AST hash unchanged → upsert mtime only, skip ``summarize()``.
+    6. AST hash changed (or new file) → skeletonize + summarize + symbols, upsert all.
     """
     ext = path.suffix.lower()
     lang = _EXT_TO_LANG.get(ext)
@@ -135,10 +189,28 @@ async def process_file(path: Path) -> None:
         logger.debug("File gone, skipping: %s", path)
         return
 
+    path_str = str(path)
+
+    # Gitignore gate — mark ignored files in ledger and skip processing.
+    _root_for_ignore = _repo_root if _repo_root is not None else path.parent
+    if _is_ignored(path, _root_for_ignore, _gitignore_patterns):
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        try:
+            with Ledger() as ledger:
+                ledger.upsert_file(path_str, mtime, "", is_ignored=True)
+        except LedgerError as exc:
+            logger.warning("Ledger error marking ignored %s: %s", path, exc)
+        return
+
     config = load_config()
 
     if not _resources_ok():
-        logger.info("Resources below threshold — skipping %s", path)
+        logger.info("Resources below threshold — re-enqueuing %s", path)
+        await asyncio.sleep(5)
+        await queue.put(path)
         return
 
     try:
@@ -152,7 +224,6 @@ async def process_file(path: Path) -> None:
         return
 
     ast_hash = _compute_ast_hash(source, ext)
-    path_str = str(path)
 
     try:
         mtime = path.stat().st_mtime
@@ -175,6 +246,12 @@ async def process_file(path: Path) -> None:
 
             ledger.upsert_file(path_str, mtime, ast_hash)
             ledger.upsert_cache(path_str, skeleton, summary)
+
+            # Symbol extraction and upsert.
+            symbols = _extract_symbols(source, path_str, lang)
+            for sym_name, refs in symbols:
+                ledger.upsert_symbol(path_str, sym_name, json.dumps(refs))
+
             logger.info("Cache updated: %s", path)
 
     except LedgerError as exc:
@@ -185,18 +262,29 @@ async def process_file(path: Path) -> None:
 # Public coroutine
 # ---------------------------------------------------------------------------
 
-async def start_processor(root: Path) -> None:  # noqa: ARG001
+async def start_processor(root: Path) -> None:
     """Consume the watcher queue and process each changed file.
 
     Pauses via ``asyncio.sleep`` when RAM or VRAM is below the configured
-    thresholds, resuming automatically once resources recover.  ``root`` is
-    accepted for API symmetry with ``start_watcher`` but is not used — the
-    queue is global.
+    thresholds, resuming automatically once resources recover.  Loads gitignore
+    patterns from *root* at startup.  Exits cleanly when a shutdown event is set.
     """
+    global _gitignore_patterns, _repo_root
+    _repo_root = root
+    _gitignore_patterns = _load_gitignore_patterns(root)
+    logger.info(
+        "Processor started — root: %s, %d gitignore pattern(s)",
+        root, len(_gitignore_patterns),
+    )
+
     queue = get_queue()
-    logger.info("Processor started")
 
     while True:
+        # Shutdown gate — check before blocking on queue.
+        if _main_module._shutdown_event and _main_module._shutdown_event.is_set():
+            logger.info("Shutdown signal received — processor exiting")
+            break
+
         # Resource gate — back-off before touching the queue.
         while not _resources_ok():
             logger.info(
@@ -211,8 +299,13 @@ async def start_processor(root: Path) -> None:  # noqa: ARG001
             continue
 
         try:
-            await process_file(path)
+            await process_file(path, queue)
         except Exception as exc:
             logger.exception("Unexpected error processing %s: %s", path, exc)
         finally:
             queue.task_done()
+
+        # Shutdown gate — check after each file is processed.
+        if _main_module._shutdown_event and _main_module._shutdown_event.is_set():
+            logger.info("Shutdown signal received — processor exiting")
+            break

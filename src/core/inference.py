@@ -3,6 +3,7 @@ import asyncio
 import logging
 import re
 import subprocess
+from pathlib import Path
 from typing import Optional
 
 import aiohttp
@@ -11,8 +12,6 @@ from src.main import load_config
 
 logger = logging.getLogger(__name__)
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
-OLLAMA_MODEL = "qwen2.5-coder:1.5b"
 HEURISTIC_LINE_THRESHOLD = 5
 
 # Semaphore is created lazily on first use to avoid binding to a specific event loop.
@@ -40,19 +39,53 @@ def _available_ram_mb() -> int:
     return 999_999  # assume sufficient if unreadable
 
 
-def _available_vram_mb() -> int:
-    """Return free VRAM in MB via nvidia-smi; returns large value if no GPU detected."""
+def _get_free_vram_mb() -> int:
+    # Try NVIDIA
     try:
         out = subprocess.check_output(
             ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
-            timeout=3,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, timeout=3
         )
-        values = [int(v.strip()) for v in out.decode().splitlines() if v.strip()]
-        return max(values) if values else 999_999
-    except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError):
-        # No NVIDIA GPU — CPU-only inference, treat VRAM as non-limiting
+        return int(out.decode().strip().split("\n")[0])
+    except Exception:
+        pass
+
+    # Try AMD ROCm
+    try:
+        out = subprocess.check_output(
+            ["rocm-smi", "--showmeminfo", "vram", "--json"],
+            stderr=subprocess.DEVNULL, timeout=3
+        )
+        import json as _json
+        data = _json.loads(out.decode())
+        # rocm-smi JSON: {"card0": {"VRAM Total Memory (B)": X, "VRAM Total Used Memory (B)": Y}}
+        for card in data.values():
+            total = int(card.get("VRAM Total Memory (B)", 0))
+            used = int(card.get("VRAM Total Used Memory (B)", 0))
+            if total > 0:
+                return (total - used) // (1024 * 1024)
+    except Exception:
+        pass
+
+    # Try AMD sysfs
+    try:
+        vram_total = int(Path("/sys/class/drm/card0/device/mem_info_vram_total").read_text().strip())
+        vram_used = int(Path("/sys/class/drm/card0/device/mem_info_vram_used").read_text().strip())
+        return (vram_total - vram_used) // (1024 * 1024)
+    except Exception:
+        pass
+
+    # No GPU detection possible — return 0 to force heuristic (safe default)
+    return 0
+
+
+def _available_vram_mb() -> int:
+    """Return free VRAM in MB; returns large value if no GPU detected."""
+    result = _get_free_vram_mb()
+    if result == 0:
+        # No GPU — CPU-only inference, treat VRAM as non-limiting
         return 999_999
+    return result
 
 
 def _heuristic_summary(source: str, language: str) -> str:
@@ -78,17 +111,25 @@ def _heuristic_summary(source: str, language: str) -> str:
 
 async def _ollama_summarize(source: str, language: str) -> Optional[str]:
     """Async Ollama call — sequential batching enforced by semaphore."""
+    import toml as _toml
+    from src.main import CONFIG_PATH as _CONFIG_PATH
+    _raw = _toml.load(str(_CONFIG_PATH))
+    host = _raw.get("OLLAMA_HOST", "localhost")
+    port = _raw.get("OLLAMA_PORT", 11434)
+    model = _raw.get("OLLAMA_MODEL", "qwen2.5-coder:1.5b")
+    url = f"http://{host}:{port}/api/generate"
+
     prompt = (
         f"Summarize this {language} code in one concise sentence (max 20 words). "
         f"Return only the summary, no preamble.\n\n{source}"
     )
-    payload = {"model": OLLAMA_MODEL, "prompt": prompt, "stream": False}
+    payload = {"model": model, "prompt": prompt, "stream": False}
 
     async with _get_semaphore():
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    OLLAMA_URL,
+                    url,
                     json=payload,
                     timeout=aiohttp.ClientTimeout(total=30),
                 ) as resp:

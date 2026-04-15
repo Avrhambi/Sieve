@@ -58,6 +58,14 @@ echo "    Ollama found"
 
 echo "==> Pulling model qwen2.5-coder:1.5b (this may take a few minutes)..."
 ollama pull qwen2.5-coder:1.5b
+echo "Verifying Ollama model..."
+if ollama run qwen2.5-coder:1.5b "ping" 2>&1 | grep -q "."; then
+    echo "Model OK"
+else
+    echo "ERROR: Model verification failed — the pull may be incomplete or corrupted."
+    echo "Re-run install.sh to retry."
+    exit 1
+fi
 echo "    Model ready"
 
 echo "==> Initialising SQLite WAL database..."

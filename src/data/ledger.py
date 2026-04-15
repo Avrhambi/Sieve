@@ -56,6 +56,11 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             "references" TEXT NOT NULL DEFAULT '[]',
             PRIMARY KEY (symbol_name, source_file)
         );
+
+        CREATE TABLE IF NOT EXISTS daemon_heartbeat (
+            id  INTEGER PRIMARY KEY,
+            ts  REAL    NOT NULL
+        );
         """
     )
     conn.commit()
@@ -191,10 +196,19 @@ class Ledger:
             return []
         return json.loads(row["references"])  # noqa: RUF100
 
+    def write_heartbeat(self, ts: float) -> None:
+        """Upsert the daemon liveness timestamp."""
+        self._conn.execute(
+            "INSERT INTO daemon_heartbeat (id, ts) VALUES (1, ?)"
+            " ON CONFLICT(id) DO UPDATE SET ts=excluded.ts",
+            (ts,),
+        )
+        self._conn.commit()
+
     def get_files_under(self, path_prefix: str) -> list[sqlite3.Row]:
         """Return all non-ignored ledger rows whose path starts with path_prefix."""
         prefix = path_prefix.rstrip("/") + "/"
         return self._conn.execute(
-            "SELECT path FROM ledger WHERE path LIKE ? AND is_ignored = 0",
+            "SELECT path FROM ledger WHERE path LIKE ? AND is_ignored = 0 ORDER BY path",
             (prefix + "%",),
         ).fetchall()

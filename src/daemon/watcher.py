@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 # Extensions the processor can handle.
 _SUPPORTED_EXTS: frozenset[str] = frozenset(
-    {".py", ".js", ".ts", ".jsx", ".tsx"} | MARKDOWN_EXTS
+    {".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".rs"} | MARKDOWN_EXTS
 )
 
 # Module-level queue shared with processor.py.
@@ -43,15 +43,27 @@ def get_queue() -> asyncio.Queue[Path]:
 # ---------------------------------------------------------------------------
 
 def _load_gitignore_patterns(root: Path) -> list[str]:
-    """Return non-comment, non-empty lines from *root*/.gitignore."""
-    gitignore = root / ".gitignore"
-    if not gitignore.exists():
-        return []
+    """Return gitignore patterns from all .gitignore files under *root*."""
+    from pathlib import Path as _Path
+
     patterns: list[str] = []
-    for raw in gitignore.read_text(errors="replace").splitlines():
-        line = raw.strip()
-        if line and not line.startswith("#"):
-            patterns.append(line)
+    root_path = _Path(root)
+    # Walk all subdirectories for .gitignore files
+    for gitignore_file in root_path.rglob(".gitignore"):
+        try:
+            rel_dir = gitignore_file.parent.relative_to(root_path)
+            prefix = str(rel_dir) + "/" if str(rel_dir) != "." else ""
+            for line in gitignore_file.read_text(errors="ignore").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                # Prefix non-rooted patterns with their directory
+                if not line.startswith("/") and prefix:
+                    patterns.append(prefix + line)
+                else:
+                    patterns.append(line.lstrip("/"))
+        except (OSError, ValueError):
+            continue
     return patterns
 
 

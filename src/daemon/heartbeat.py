@@ -12,34 +12,19 @@ import sqlite3
 import time
 from pathlib import Path
 
+from src.data.ledger import Ledger
+
 logger = logging.getLogger(__name__)
 
 _DB_PATH = Path(__file__).parent.parent.parent / "ledger.db"
 _TICK_INTERVAL: float = 10.0       # seconds between ticks
 STALE_THRESHOLD: float = 30.0      # seconds before a tick is considered stale
 
-_TABLE_DDL = """
-CREATE TABLE IF NOT EXISTS daemon_heartbeat (
-    id  INTEGER PRIMARY KEY CHECK (id = 1),
-    ts  REAL    NOT NULL
-)
-"""
-
 
 def _write_tick(db_path: Path) -> None:
     """Write current Unix timestamp into the single-row heartbeat table."""
-    conn = sqlite3.connect(str(db_path), timeout=0.5)
-    try:
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute(_TABLE_DDL)
-        conn.execute(
-            "INSERT INTO daemon_heartbeat (id, ts) VALUES (1, ?)"
-            " ON CONFLICT(id) DO UPDATE SET ts = excluded.ts",
-            (time.time(),),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    with Ledger(db_path) as ledger:
+        ledger.write_heartbeat(time.time())
 
 
 async def start_heartbeat(

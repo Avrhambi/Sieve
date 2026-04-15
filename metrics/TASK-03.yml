@@ -1,0 +1,49 @@
+session_metadata:
+  timestamp: 2026-04-13
+  task_id: "TASK-03"
+  task_objective: "AST skeletonization — tree-sitter parsing for Python/JS/TS/Markdown, extension-to-grammar registry, fallback handling"
+  note: "Reconstructed from git commit 4d32178 (wave-1 batch)"
+
+cli_stats:
+  user_prompts: 5
+  manual_corrections: 1
+  total_turns: 10
+  linter_fixes: 1
+  test_failures: 2
+  file_reads: 4
+  shell_commands: 6
+
+analysis:
+  prompt_clarity_score: 7/10
+  correction_ratio: 0.20
+  primary_bottleneck: >
+    Grammar package for TypeScript was mapped to the JavaScript grammar instead of the dedicated
+    TypeScript grammar — only caught during wave-5 audit. Markdown grammar was skipped entirely
+    and replaced with regex (documented as known issue ISSUE-11, fixed in wave-6).
+  lesson_learned: >
+    When using a grammar/parser library with per-language packages, list every target language
+    explicitly in the session prompt and require the session to confirm each one is handled by
+    its own grammar, not a sibling grammar. TypeScript ≠ JavaScript at the grammar level.
+    Also: "not available" is an acceptable answer — a documented regex fallback is better than
+    a silently wrong grammar mapping.
+
+generalized_principles:
+  - principle: "List every target language/format explicitly in parser session prompts"
+    why: >
+      Implementers default to the closest available grammar when an exact one is missing.
+      The substitution is often silent and only caught by a type-level test or later audit.
+      Requiring explicit confirmation per language catches this at session time.
+    applies_to: "Any session implementing multi-language parsing, serialization, or rendering"
+
+  - principle: "Fallback paths must be documented, not hidden"
+    why: >
+      A silent fallback (e.g., regex instead of grammar-based parsing) that produces subtly
+      wrong output is worse than a loud fallback that logs a warning. Document the fallback
+      in a known-issues file at session time, not months later.
+    applies_to: "Any session implementing parsing with optional dependencies"
+
+  - principle: "Pin grammar package versions at install time"
+    why: >
+      Grammar packages (tree-sitter, ANTLR, etc.) have breaking API changes between minor versions.
+      An unpinned dependency can silently change behavior on reinstall.
+    applies_to: "Any project using third-party language grammars"

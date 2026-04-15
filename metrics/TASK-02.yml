@@ -1,0 +1,44 @@
+session_metadata:
+  timestamp: 2026-04-13
+  task_id: "TASK-02"
+  task_objective: "Data persistence layer — SQLite WAL interface, table schema (4 tables), public CRUD API, concurrent read/write safety"
+  note: "Reconstructed from git commit 4d32178 (wave-1 batch)"
+
+cli_stats:
+  user_prompts: 4
+  manual_corrections: 0
+  total_turns: 8
+  linter_fixes: 1
+  test_failures: 1
+  file_reads: 3
+  shell_commands: 5
+
+analysis:
+  prompt_clarity_score: 8/10
+  correction_ratio: 0.00
+  primary_bottleneck: "Deciding public vs private API surface — overly exposing internal connection object caused downstream misuse (fixed in wave-5)"
+  lesson_learned: >
+    Persistence layer sessions need explicit guidance on what to expose publicly vs. keep private.
+    A raw connection object returned or exposed via a property creates a coupling surface that
+    downstream sessions will use — and that creates a maintenance problem. Specify "public API only:
+    these N methods, nothing else" in the session prompt. Also: WAL mode + busy_timeout must be
+    set at connection creation time, not as an afterthought.
+
+generalized_principles:
+  - principle: "Specify public API surface explicitly in the session prompt"
+    why: >
+      Without explicit constraints, implementers expose whatever is convenient. Downstream sessions
+      then depend on those internals. Retrofitting encapsulation requires touching every caller.
+    applies_to: "Any persistence, client, or service layer session"
+
+  - principle: "Enable WAL mode and busy_timeout at connection creation, not later"
+    why: >
+      WAL mode and busy_timeout must be set before any reads or writes. Adding them later in a
+      refactor requires finding every sqlite3.connect() call across all modules.
+    applies_to: "Any project using SQLite with concurrent readers and writers"
+
+  - principle: "Concurrent access patterns must be decided at schema time"
+    why: >
+      Schema choices (WAL vs rollback journal, index design) affect every reader and writer.
+      Changing them after multiple modules are built requires coordinated changes across sessions.
+    applies_to: "Any project with multiple processes sharing a database"

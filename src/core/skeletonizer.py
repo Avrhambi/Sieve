@@ -22,6 +22,10 @@ _LANG_TO_EXT: dict[str, str] = {
     "tsx": ".tsx",
     "markdown": ".md",
     "md": ".md",
+    "go": ".go",
+    "golang": ".go",
+    "rust": ".rs",
+    "rs": ".rs",
 }
 
 
@@ -49,6 +53,11 @@ def skeletonize(source: bytes, language: str) -> str:
 
     if ext in MARKDOWN_EXTS or language.lower() in ("md", "markdown"):
         return _skeletonize_markdown(source)
+
+    if ext == ".go":
+        return _skeletonize_go(source)
+    if ext == ".rs":
+        return _skeletonize_rust(source)
 
     lang_obj = get_language(ext)
     if lang_obj is None:
@@ -185,6 +194,146 @@ def _skeletonize_js(root: Node, source: bytes) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Go
+# ---------------------------------------------------------------------------
+
+_GO_KEEP_FULL_TYPES = frozenset({"type_declaration", "import_declaration"})
+_GO_FN_TYPES = frozenset({"function_declaration", "method_declaration"})
+
+
+def _skeletonize_go(source: bytes) -> str:
+    """Skeletonize Go source using tree-sitter-go.
+
+    Keeps function/method signatures (body collapsed to ``{...}``),
+    type declarations, and import declarations in full.
+    Falls back to a regex approach if parsing fails.
+    """
+    try:
+        from src.core.registry import get_language
+
+        lang_obj = get_language(".go")
+        if lang_obj is None:
+            raise RuntimeError("Go language not registered")
+
+        parser = Parser(lang_obj)
+        tree = parser.parse(source)
+
+        blocks: list[tuple[int, int]] = []  # (start_byte, end_byte) of bodies to collapse
+
+        def _walk(node: Node) -> None:
+            if node.type in _GO_KEEP_FULL_TYPES:
+                return  # keep fully — don't recurse further
+            if node.type in _GO_FN_TYPES:
+                body = next(
+                    (c for c in node.children if c.type == "block"), None
+                )
+                if body is not None:
+                    blocks.append((body.start_byte, body.end_byte))
+                return  # don't recurse into the body we're collapsing
+            for child in node.children:
+                _walk(child)
+
+        _walk(tree.root_node)
+
+        blocks.sort(key=lambda b: b[0])
+        parts: list[str] = []
+        prev = 0
+        for start, end in blocks:
+            parts.append(source[prev:start].decode("utf-8", errors="replace"))
+            parts.append("{...}")
+            prev = end
+        parts.append(source[prev:].decode("utf-8", errors="replace"))
+        return "".join(parts)
+
+    except Exception:
+        # Fallback: regex approach
+        text = source.decode("utf-8", errors="replace")
+        kept = []
+        for line in text.splitlines():
+            if line.startswith("func ") or line.startswith("type "):
+                kept.append(line)
+        return "\n".join(kept)
+
+
+# ---------------------------------------------------------------------------
+# Rust
+# ---------------------------------------------------------------------------
+
+_RUST_KEEP_FULL_TYPES = frozenset(
+    {"struct_item", "enum_item", "trait_item", "use_declaration"}
+)
+_RUST_FN_TYPES = frozenset({"function_item"})
+
+
+def _skeletonize_rust(source: bytes) -> str:
+    """Skeletonize Rust source using tree-sitter-rust.
+
+    Keeps function signatures (body collapsed to ``{...}``), impl headers
+    with their method signatures, struct/enum/trait definitions, and use
+    declarations in full.  Falls back to a regex approach if parsing fails.
+    """
+    try:
+        from src.core.registry import get_language
+
+        lang_obj = get_language(".rs")
+        if lang_obj is None:
+            raise RuntimeError("Rust language not registered")
+
+        parser = Parser(lang_obj)
+        tree = parser.parse(source)
+
+        blocks: list[tuple[int, int]] = []  # (start_byte, end_byte) of bodies to collapse
+
+        def _walk(node: Node) -> None:
+            if node.type in _RUST_KEEP_FULL_TYPES:
+                return  # keep fully
+            if node.type in _RUST_FN_TYPES:
+                body = next(
+                    (c for c in node.children if c.type == "block"), None
+                )
+                if body is not None:
+                    blocks.append((body.start_byte, body.end_byte))
+                return  # don't recurse into the body
+            if node.type == "impl_item":
+                # Keep the impl header; recurse only into the declaration_list
+                # so that nested methods also get their bodies collapsed.
+                decl_list = next(
+                    (c for c in node.children if c.type == "declaration_list"),
+                    None,
+                )
+                if decl_list is not None:
+                    for child in decl_list.children:
+                        _walk(child)
+                return
+            for child in node.children:
+                _walk(child)
+
+        _walk(tree.root_node)
+
+        blocks.sort(key=lambda b: b[0])
+        parts: list[str] = []
+        prev = 0
+        for start, end in blocks:
+            parts.append(source[prev:start].decode("utf-8", errors="replace"))
+            parts.append("{...}")
+            prev = end
+        parts.append(source[prev:].decode("utf-8", errors="replace"))
+        return "".join(parts)
+
+    except Exception:
+        # Fallback: regex approach
+        text = source.decode("utf-8", errors="replace")
+        kept = []
+        for line in text.splitlines():
+            if re.match(
+                r"^(pub fn |fn |pub struct |struct |pub enum |enum |pub trait |trait |impl )",
+                line,
+            ):
+                kept.append(line)
+        return "\n".join(kept)
+
+
+# ---------------------------------------------------------------------------
 # Markdown
 # ---------------------------------------------------------------------------
 
@@ -192,12 +341,49 @@ _LINK_RE = re.compile(r"\[.+?\]\(.+?\)")
 
 
 def _skeletonize_markdown(source: bytes) -> str:
-    src = source.decode("utf-8", errors="replace")
-    result: list[str] = []
-    for line in src.splitlines(keepends=True):
-        stripped = line.lstrip()
-        if stripped.startswith("#"):
-            result.append(line)
-        elif _LINK_RE.search(line):
-            result.append(line)
-    return "".join(result)
+    """Extract structure from Markdown using tree-sitter-markdown."""
+    try:
+        import tree_sitter_markdown as ts_md  # type: ignore
+        from tree_sitter import Language, Parser as _Parser
+
+        lang = Language(ts_md.language())
+        parser = _Parser(lang)
+        tree = parser.parse(source)
+
+        kept: list[str] = []
+        text = source.decode("utf-8", errors="replace")
+        lines = text.splitlines()
+
+        def _collect(node) -> None:
+            if node.type in ("atx_heading", "setext_heading"):
+                # Keep the heading line(s)
+                start = node.start_point[0]
+                end = node.end_point[0]
+                for ln in range(start, min(end + 1, len(lines))):
+                    kept.append(lines[ln])
+            elif node.type == "fenced_code_block":
+                # Keep only the opening fence line (language tag)
+                start = node.start_point[0]
+                if start < len(lines):
+                    kept.append(lines[start])
+                kept.append("...")
+            elif node.type == "link":
+                start = node.start_point[0]
+                end = node.end_point[0]
+                if start == end and start < len(lines):
+                    kept.append(lines[start])
+            else:
+                for child in node.children:
+                    _collect(child)
+
+        _collect(tree.root_node)
+        return "\n".join(kept)
+
+    except Exception:
+        # Fallback: regex approach (original implementation)
+        text = source.decode("utf-8", errors="replace")
+        kept = []
+        for line in text.splitlines():
+            if line.startswith("#") or "](" in line:
+                kept.append(line)
+        return "\n".join(kept)

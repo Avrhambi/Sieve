@@ -16,6 +16,15 @@ import argparse
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
+# WSL2 detection
+# ---------------------------------------------------------------------------
+def _is_wsl2() -> bool:
+    try:
+        return "microsoft" in open("/proc/version").read().lower()
+    except OSError:
+        return False
+
+# ---------------------------------------------------------------------------
 # Constants (mirror src.daemon.heartbeat without importing it)
 # ---------------------------------------------------------------------------
 _STALE_THRESHOLD = 30.0          # seconds — matches STALE_THRESHOLD in heartbeat.py
@@ -33,12 +42,14 @@ _ap.add_argument("--mode", default="prompt", choices=["prompt", "compact"])
 _args, _ = _ap.parse_known_args()
 
 # ---------------------------------------------------------------------------
-# !full [path] bypass — exit 0 immediately; raw pass-through handled by Claude
+# !full [path] bypass — inject file contents and exit 0
 # ---------------------------------------------------------------------------
-def _check_full_bypass() -> bool:
-    if os.environ.get("SIEVE_PROMPT", "").startswith("!full "):
-        return True
-    if not sys.stdin.isatty():
+def _check_full_bypass() -> None:
+    prompt = None
+    env_prompt = os.environ.get("SIEVE_PROMPT", "")
+    if env_prompt.startswith("!full "):
+        prompt = env_prompt
+    elif not sys.stdin.isatty():
         try:
             import select as _sel
             ready, _, _ = _sel.select([sys.stdin], [], [], 0.005)
@@ -46,18 +57,26 @@ def _check_full_bypass() -> bool:
                 data = sys.stdin.buffer.read()
                 try:
                     import json as _j
-                    prompt = _j.loads(data).get("prompt", "")
+                    candidate = _j.loads(data).get("prompt", "")
                 except Exception:
-                    prompt = data.decode("utf-8", errors="replace")
-                if str(prompt).lstrip().startswith("!full "):
-                    return True
+                    candidate = data.decode("utf-8", errors="replace")
+                if str(candidate).lstrip().startswith("!full "):
+                    prompt = str(candidate).lstrip()
         except Exception:
             pass
-    return False
+    if prompt is not None and prompt.startswith("!full "):
+        file_path = prompt[len("!full "):].strip()
+        try:
+            with open(file_path, "r", errors="replace") as fh:
+                contents = fh.read()
+            print(f"### {file_path}")
+            print(contents)
+        except OSError as e:
+            print(f"[sieve] !full: could not read {file_path!r}: {e}", file=sys.stderr)
+        exit(0)
 
 
-if _check_full_bypass():
-    sys.exit(0)
+_check_full_bypass()
 
 # ---------------------------------------------------------------------------
 # Daemon liveness — raw sqlite3, no src.* import
@@ -83,28 +102,61 @@ def _daemon_alive() -> bool:
 # File-tree heuristic fallback — pure stdlib, no src.* imports
 # ---------------------------------------------------------------------------
 def _file_tree_fallback(max_depth: int = 3) -> str:
-    """Walk cwd up to max_depth with os.scandir (faster than Path.iterdir)."""
-    cwd_str = str(Path.cwd().resolve())
-    lines = ["[sieve] daemon offline — file-tree heuristic", ""]
+    """Walk cwd up to max_depth with os.scandir (faster than Path.iterdir).
 
-    def _walk(d: str, depth: int) -> None:
-        if depth > max_depth:
-            return
+    On WSL2, os.scandir crosses the Windows filesystem boundary (150-250ms).
+    Tries a SQLite fast-path first using the ledger WAL memory.
+    """
+    cwd = Path.cwd().resolve()
+    cwd_str = str(cwd)
+
+    # On WSL2, os.scandir crosses the Windows filesystem boundary (150-250ms).
+    # Read from SQLite instead — it's already in WAL memory.
+    _used_sqlite_fallback = False
+    if _is_wsl2():
         try:
-            entries = sorted(os.scandir(d), key=lambda e: e.name)
-        except OSError:
-            return
-        for e in entries:
-            if e.name.startswith("."):
-                continue
-            if e.is_dir(follow_symlinks=False):
-                _walk(e.path, depth + 1)
-            elif os.path.splitext(e.name)[1] in _SOURCE_EXTS:
-                rel = e.path[len(cwd_str) + 1:] if e.path.startswith(cwd_str) else e.path
-                lines.append(f"  {rel}")
+            import sqlite3 as _sqlite3
+            _db_path = str(Path(__file__).parent.parent / "ledger.db")
+            _fc = _sqlite3.connect(_db_path)
+            _fc.execute("PRAGMA journal_mode=WAL")
+            _fc.execute("PRAGMA busy_timeout=500")
+            _rows = _fc.execute(
+                "SELECT path FROM ledger WHERE path LIKE ? AND is_ignored=0 ORDER BY path",
+                (str(cwd) + "/%",)
+            ).fetchall()
+            _fc.close()
+            if _rows:
+                print("[sieve] daemon offline — ledger heuristic (WSL2)")
+                for (_p,) in _rows:
+                    print(f"  {_p}")
+                _used_sqlite_fallback = True
+        except Exception:
+            pass  # fall through to scandir
 
-    _walk(cwd_str, 0)
-    return "\n".join(lines)
+    if not _used_sqlite_fallback:
+        max_depth = _load_max_depth()
+        lines = ["[sieve] daemon offline — file-tree heuristic", ""]
+
+        def _walk(d: str, depth: int) -> None:
+            if depth > max_depth:
+                return
+            try:
+                entries = sorted(os.scandir(d), key=lambda e: e.name)
+            except OSError:
+                return
+            for e in entries:
+                if e.name.startswith("."):
+                    continue
+                if e.is_dir(follow_symlinks=False):
+                    _walk(e.path, depth + 1)
+                elif os.path.splitext(e.name)[1] in _SOURCE_EXTS:
+                    rel = e.path[len(cwd_str) + 1:] if e.path.startswith(cwd_str) else e.path
+                    lines.append(f"  {rel}")
+
+        _walk(cwd_str, 0)
+        return "\n".join(lines)
+
+    return ""
 
 # ---------------------------------------------------------------------------
 # Config loader — reads TOML with stdlib (no pydantic / toml dep on this path)
@@ -121,10 +173,36 @@ def _load_max_depth() -> int:
         return 3  # matches config default
 
 # ---------------------------------------------------------------------------
+# Focal-file extraction — find files explicitly mentioned in the prompt
+# ---------------------------------------------------------------------------
+def _focal_files(prompt: str, cwd: str) -> set:
+    """Return absolute paths of files mentioned in the prompt."""
+    import re
+    pattern = r'[\w./\-]+\.(?:py|js|ts|jsx|tsx|md|go|rs|markdown)'
+    matches = re.findall(pattern, prompt)
+    focal: set = set()
+    for m in matches:
+        # Try as absolute path first
+        if os.path.isfile(m):
+            focal.add(os.path.abspath(m))
+        # Try relative to cwd
+        candidate = os.path.join(cwd, m)
+        if os.path.isfile(candidate):
+            focal.add(os.path.abspath(candidate))
+    return focal
+
+# ---------------------------------------------------------------------------
 # Ledger helpers — deferred import, only reached when daemon is alive
 # ---------------------------------------------------------------------------
-def _get_skeletons() -> str:
-    """Query context_cache for all non-ignored files under cwd."""
+def _get_skeletons(focal: set = None) -> str:
+    """Query context_cache for all non-ignored files under cwd.
+
+    Files whose absolute path is in *focal* are injected as full content
+    instead of their skeleton (hybrid context injection).
+    """
+    if focal is None:
+        focal = set()
+
     if str(_REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(_REPO_ROOT))
 
@@ -132,21 +210,40 @@ def _get_skeletons() -> str:
 
     cwd = str(Path.cwd())
     sections: list[str] = []
+    full_count = 0
+    skeleton_count = 0
     try:
         with Ledger() as ledger:
             rows = ledger.get_files_under(cwd)
             for (path,) in rows:
                 cache = ledger.get_cache(path)
-                if cache and cache["skeleton"]:
+                try:
+                    rel = Path(path).relative_to(cwd)
+                except ValueError:
+                    rel = Path(path).name
+                abs_path = os.path.abspath(path)
+                if abs_path in focal:
+                    # Inject full file content for focal files
                     try:
-                        rel = Path(path).relative_to(cwd)
-                    except ValueError:
-                        rel = Path(path).name
+                        with open(path, "r", errors="replace") as fh:
+                            content = fh.read()
+                        sections.append(f"### {rel} [full]\n{content}")
+                        full_count += 1
+                    except OSError:
+                        # Fall back to skeleton if file can't be read
+                        if cache and cache["skeleton"]:
+                            sections.append(f"### {rel}\n{cache['skeleton']}")
+                        skeleton_count += 1
+                elif cache and cache["skeleton"]:
                     sections.append(f"### {rel}\n{cache['skeleton']}")
+                    skeleton_count += 1
     except LedgerError as exc:
         return f"[sieve] ledger locked ({exc})"
     except Exception as exc:
         return f"[sieve] ledger error ({exc})"
+
+    if full_count > 0:
+        print(f"[sieve] hybrid context: {full_count} file(s) full, {skeleton_count} skeleton(s)", file=sys.stderr)
 
     return "\n\n".join(sections) if sections else "[sieve] no cached skeletons in ledger"
 
@@ -210,6 +307,27 @@ def _process_images() -> str:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+def _read_prompt_text() -> str:
+    """Read the prompt text from SIEVE_PROMPT env var or stdin (non-blocking)."""
+    env_prompt = os.environ.get("SIEVE_PROMPT", "")
+    if env_prompt:
+        return env_prompt
+    if not sys.stdin.isatty():
+        try:
+            import select as _sel
+            import json as _j
+            ready, _, _ = _sel.select([sys.stdin], [], [], 0.005)
+            if ready:
+                data = sys.stdin.buffer.read()
+                try:
+                    return _j.loads(data).get("prompt", "")
+                except Exception:
+                    return data.decode("utf-8", errors="replace")
+        except Exception:
+            pass
+    return ""
+
+
 def main() -> None:
     parts: list[str] = []
 
@@ -219,18 +337,20 @@ def main() -> None:
         if alive:
             parts.append(_compact_skeleton())
         else:
-            parts.append(_file_tree_fallback(_load_max_depth()))
+            parts.append(_file_tree_fallback())
     else:
         # UserPromptSubmit
         if alive:
-            result = _get_skeletons()
+            prompt_text = _read_prompt_text()
+            focal = _focal_files(prompt_text, str(Path.cwd()))
+            result = _get_skeletons(focal)
             if result.startswith("[sieve] ledger"):
                 # DB locked / error → fail fast to heuristic
-                parts.append(_file_tree_fallback(_load_max_depth()))
+                parts.append(_file_tree_fallback())
             else:
                 parts.append(result)
         else:
-            parts.append(_file_tree_fallback(_load_max_depth()))
+            parts.append(_file_tree_fallback())
 
     img = _process_images()
     if img:

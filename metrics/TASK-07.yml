@@ -1,0 +1,55 @@
+session_metadata:
+  timestamp: 2026-04-14
+  task_id: "TASK-07"
+  task_objective: "Latency-critical CLI hook — <50ms hard constraint, daemon liveness check, skeleton injection, offline fallback, OCR integration"
+  note: "Reconstructed from git commit ed5f462 (feat/task-07-hook, merged after PP-3)"
+
+cli_stats:
+  user_prompts: 4
+  manual_corrections: 1
+  total_turns: 9
+  linter_fixes: 0
+  test_failures: 1
+  file_reads: 6
+  shell_commands: 7
+
+analysis:
+  prompt_clarity_score: 8/10
+  correction_ratio: 0.25
+  primary_bottleneck: >
+    Branch feat/task-07-hook was complete and correct but not visible on main — caused
+    confusion when checking the working tree on main (showed stubs). Merge conflict
+    on PP git action because handoff files were written directly to working tree on main
+    instead of the feature branch. Resolved with git stash.
+  lesson_learned: >
+    In a parallelized multi-session build, always verify you are reading the correct branch
+    when evaluating session output. A file on main may be a stub while the same file on
+    the feature branch is fully implemented. Never assess session output by reading main —
+    read the feature branch or the merge commit.
+
+generalized_principles:
+  - principle: "Start the timer before the first import in any latency-critical entrypoint"
+    why: >
+      Python's import system is slow on cold cache. Any third-party import before the timer
+      starts hides real latency from the measurement. The timer must be the first executable
+      line, before any import statement.
+    applies_to: "Any CLI hook, request handler, or event listener with a hard latency SLA"
+
+  - principle: "Stdlib-only on the hot path; third-party only after the fast gate"
+    why: >
+      If the fast path (e.g., daemon alive → read SQLite) takes 15ms, importing a third-party
+      library (even lazily) on the hot path adds 5–50ms. Keep everything before the decision
+      gate as stdlib-only. Defer third-party imports until after the gate confirms they're needed.
+    applies_to: "Any performance-sensitive entrypoint with a conditional fast/slow path"
+
+  - principle: "Write handoff files to the feature branch, not to main"
+    why: >
+      Handoff files written directly to main create a merge conflict when the feature branch
+      is later merged. All session output (source, docs, handoff) must live on the same branch.
+    applies_to: "Any multi-session build using feature branches"
+
+  - principle: "Assess session output from the feature branch, not from main"
+    why: >
+      Main may show stubs while the feature branch has the real implementation. Reading main
+      to verify session completion gives a false negative and causes unnecessary re-runs.
+    applies_to: "Any multi-session build where sessions work on separate branches"

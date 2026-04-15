@@ -1,0 +1,52 @@
+session_metadata:
+  timestamp: 2026-04-13
+  task_id: "TASK-05"
+  task_objective: "Tiered local inference — heuristic fallback, local LLM via HTTP, resource governor (RAM/VRAM thresholds), graceful degradation"
+  note: "Reconstructed from git commit 4d32178 (wave-1 batch)"
+
+cli_stats:
+  user_prompts: 5
+  manual_corrections: 1
+  total_turns: 10
+  linter_fixes: 0
+  test_failures: 1
+  file_reads: 4
+  shell_commands: 5
+
+analysis:
+  prompt_clarity_score: 7/10
+  correction_ratio: 0.20
+  primary_bottleneck: >
+    LLM endpoint URL and model name were hardcoded as module-level constants rather than read
+    from config — caught in wave-5 audit (ISSUE-04). VRAM detection used only nvidia-smi,
+    silently returning unlimited VRAM on AMD/Intel hardware (ISSUE-07, fixed wave-5).
+  lesson_learned: >
+    "Never hard-code" is not sufficient guidance for a session. The session prompt must name
+    every value that should come from config and list the exact config key names. Without that,
+    sessions will hard-code values that feel like constants (API endpoints, model names, thresholds)
+    because they are constant at session time. Also: hardware detection code should document
+    which hardware it does NOT support, not just which it does.
+
+generalized_principles:
+  - principle: "Name every config key explicitly in the session prompt"
+    why: >
+      A general instruction like 'read from config' leaves key naming to the session, which
+      creates inconsistency across modules. List the exact key names: OLLAMA_HOST, OLLAMA_PORT,
+      etc. Modules that agree on key names can be tested in isolation without coordination.
+    applies_to: "Any session implementing a module that reads external configuration"
+
+  - principle: "Tiered degradation: fast heuristic → external service → fallback, in that order"
+    why: >
+      Any feature depending on an external service (LLM, database, API) needs at least three
+      tiers: a fast synchronous path for simple cases, the external call for complex ones,
+      and a silent fallback when the external service is unavailable. Never raise on service
+      unavailability from a background pipeline.
+    applies_to: "Any background processing pipeline that calls external services"
+
+  - principle: "Hardware detection must document unsupported hardware, not assume universal support"
+    why: >
+      A detection function that returns 'unlimited' when it can't detect hardware is
+      functionally broken on unsupported hardware. Document: 'This function supports X.
+      On Y, it returns Z (conservative default).' Silent unlimited assumptions cause OOM on
+      the exact machines where users can't afford it.
+    applies_to: "Any code that gates behavior on hardware capabilities (VRAM, GPU, CPU features)"

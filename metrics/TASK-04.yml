@@ -1,0 +1,49 @@
+session_metadata:
+  timestamp: 2026-04-13
+  task_id: "TASK-04"
+  task_objective: "Multimodal OCR pipeline — image-to-text extraction, structured output formatting (toasts), integration with hook latency budget"
+  note: "Reconstructed from git commit 4d32178 (wave-1 batch)"
+
+cli_stats:
+  user_prompts: 4
+  manual_corrections: 0
+  total_turns: 8
+  linter_fixes: 0
+  test_failures: 1
+  file_reads: 3
+  shell_commands: 4
+
+analysis:
+  prompt_clarity_score: 8/10
+  correction_ratio: 0.00
+  primary_bottleneck: >
+    OCR library import took ~200ms on first call — would have violated the <50ms hook constraint
+    if imported eagerly. Required deferred import pattern (only import when images exist).
+  lesson_learned: >
+    Any optional feature with a heavy import (ML model loading, OCR engine, database driver)
+    must be imported lazily — guarded by a condition that is false on the hot path.
+    The latency budget for the calling system must be communicated to the feature session,
+    not just to the hook session. Every module that can be called from a latency-critical path
+    owns responsibility for its import cost.
+
+generalized_principles:
+  - principle: "Communicate latency budgets to feature sessions, not just the integrator"
+    why: >
+      A feature session that doesn't know the caller's latency constraint will make
+      import choices that are correct in isolation but violate the system budget.
+      Include the budget in the session prompt for any module that may be on a hot path.
+    applies_to: "Any project with latency-sensitive integration points (CLI hooks, request handlers, event listeners)"
+
+  - principle: "Use lazy/deferred imports for optional heavy dependencies"
+    why: >
+      Optional features (OCR, ML inference, PDF parsing) often pull in large packages.
+      Importing them at module load time adds their startup cost to every invocation,
+      even when the feature is not used. Guard with: `if <condition>: import <heavy_package>`.
+    applies_to: "Any CLI tool, hook, or handler where startup time is observable"
+
+  - principle: "Separate 'extract' from 'format' in pipeline modules"
+    why: >
+      Mixing extraction logic with output formatting makes both harder to test and harder to
+      swap. A testable pipeline has: raw_data → extract() → structure() → format(). Each step
+      can be unit tested independently.
+    applies_to: "Any ETL or transformation pipeline"
