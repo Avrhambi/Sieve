@@ -448,7 +448,7 @@ function Test03Page() {
 [complete file contents — every line, including all function bodies]
 
 def request(method, url, **kwargs):
-    """Constructs a :class:`Request <Request>`, ..."""
+    """Constructs a :class: Request, ..."""
     with sessions.Session() as session:
         return session.request(method=method, url=url, **kwargs)
 ...`}</Expected>
