@@ -1,453 +1,868 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Play, Settings, Layers, Zap, Target, AlertTriangle, RefreshCw, BarChart3,
-  Copy, Check, X, ChevronRight, ChevronLeft, Menu, Activity,
-  Wifi, WifiOff, AlertCircle, Terminal, Clock, Trash2, Download, Upload,
-  CheckCircle2
+  Copy, Check, ChevronRight, Menu, X, Activity, Clock, AlertCircle,
+  Terminal, FileText, CheckSquare, Square, BookOpen, Cpu
 } from 'lucide-react';
 
-// ─── Config ──────────────────────────────────────────────────────────────────
-const BACKEND = 'http://localhost:8765';
-
-const DEFAULT_CONFIG = {
-  sieve:    '/c/Users/avrha/Documents/projects/Sieve-testing/sieve',
-  requests: '/c/Users/avrha/Documents/projects/Sieve-testing/projects/requests',
-  click:    '/c/Users/avrha/Documents/projects/Sieve-testing/projects/click',
-  httpx:    '/c/Users/avrha/Documents/projects/Sieve-testing/projects/httpx',
+// ─── Copy Button ─────────────────────────────────────────────────────────────
+const CopyBtn = ({ text, label = 'Copy' }) => {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      onClick={() => navigator.clipboard.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 2000); }).catch(() => {})}
+      className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-600/50 text-xs text-slate-300 hover:text-white rounded-lg transition-all shrink-0"
+    >
+      {done ? <><Check size={11} className="text-emerald-400" /> Copied</> : <><Copy size={11} /> {label}</>}
+    </button>
+  );
 };
 
-const PHASES = [
-  { id: 0, label: 'Automated',    icon: Play          },
-  { id: 1, label: 'Setup',        icon: Settings      },
-  { id: 2, label: 'Core',         icon: Layers        },
-  { id: 3, label: 'Advanced',     icon: Zap           },
-  { id: 4, label: 'Answer Quality', icon: Target      },
-  { id: 5, label: 'Edge Cases',   icon: AlertTriangle },
-  { id: 6, label: 'Consistency',  icon: RefreshCw     },
+// ─── Code Block ──────────────────────────────────────────────────────────────
+const Code = ({ children, copyable = true }) => (
+  <div className="relative group mt-3 mb-1">
+    <pre className="bg-black/50 border border-slate-700/50 rounded-xl px-4 py-3 text-sm text-slate-200 font-mono overflow-x-auto leading-relaxed whitespace-pre">
+      {children}
+    </pre>
+    {copyable && (
+      <div className="absolute top-2.5 right-2.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <CopyBtn text={children} />
+      </div>
+    )}
+  </div>
+);
+
+// ─── Prompt Block ─────────────────────────────────────────────────────────────
+const Prompt = ({ children }) => (
+  <div className="relative group mt-3 mb-1">
+    <div className="bg-blue-950/30 border border-blue-700/40 rounded-xl px-4 py-3">
+      <div className="flex items-center gap-1.5 mb-2">
+        <Terminal size={11} className="text-blue-400" />
+        <span className="text-xs font-semibold uppercase tracking-wider text-blue-400">Prompt — copy and send to Claude</span>
+      </div>
+      <p className="text-sm text-slate-200 leading-relaxed font-mono">{children}</p>
+    </div>
+    <div className="absolute top-2.5 right-2.5 opacity-0 group-hover:opacity-100 transition-opacity">
+      <CopyBtn text={children} label="Copy prompt" />
+    </div>
+  </div>
+);
+
+// ─── Expected Block ───────────────────────────────────────────────────────────
+const Expected = ({ children }) => (
+  <div className="mt-3 mb-1 bg-emerald-950/20 border border-emerald-800/40 rounded-xl px-4 py-3">
+    <div className="flex items-center gap-1.5 mb-2">
+      <Check size={11} className="text-emerald-400" />
+      <span className="text-xs font-semibold uppercase tracking-wider text-emerald-400">Expected output</span>
+    </div>
+    <pre className="text-sm text-slate-300 font-mono whitespace-pre-wrap leading-relaxed">{children}</pre>
+  </div>
+);
+
+// ─── Note / Warning ───────────────────────────────────────────────────────────
+const Note = ({ children, variant = 'info' }) => {
+  const styles = {
+    info:    'bg-blue-950/20 border-blue-700/40 text-blue-300',
+    warn:    'bg-amber-950/20 border-amber-700/40 text-amber-300',
+    tip:     'bg-purple-950/20 border-purple-700/40 text-purple-300',
+  };
+  return (
+    <div className={`mt-3 mb-1 border rounded-xl px-4 py-3 text-sm leading-relaxed ${styles[variant]}`}>
+      {children}
+    </div>
+  );
+};
+
+// ─── Checklist ────────────────────────────────────────────────────────────────
+const Checklist = ({ id, items }) => {
+  const [checked, setChecked] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(`chk-${id}`) || '{}'); }
+    catch { return {}; }
+  });
+
+  const toggle = (i) => {
+    const next = { ...checked, [i]: !checked[i] };
+    setChecked(next);
+    localStorage.setItem(`chk-${id}`, JSON.stringify(next));
+  };
+
+  return (
+    <div className="mt-3 space-y-2">
+      {items.map((item, i) => (
+        <button key={i} onClick={() => toggle(i)}
+          className="w-full flex items-start gap-3 text-left group">
+          <span className="mt-0.5 shrink-0">
+            {checked[i]
+              ? <CheckSquare size={16} className="text-emerald-400" />
+              : <Square size={16} className="text-slate-500 group-hover:text-slate-400 transition-colors" />}
+          </span>
+          <span className={`text-sm leading-relaxed transition-colors ${checked[i] ? 'text-slate-500 line-through' : 'text-slate-300'}`}>
+            {item}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+};
+
+// ─── Section wrapper ──────────────────────────────────────────────────────────
+const Section = ({ title, children, accent = false }) => (
+  <div className={`border rounded-2xl p-7 transition-all bg-slate-900/40 ${accent ? 'border-blue-700/40' : 'border-slate-700/50'}`}>
+    {title && <h3 className="text-base font-bold text-white mb-4 flex items-center gap-2">{title}</h3>}
+    {children}
+  </div>
+);
+
+// ─── AB Table ────────────────────────────────────────────────────────────────
+const ABTable = ({ rows, headers = ['Dimension', 'Mode A — No Sieve', 'Mode B — Sieve ON'] }) => (
+  <div className="mt-3 overflow-x-auto rounded-xl border border-slate-700/50">
+    <table className="w-full text-sm">
+      <thead className="bg-slate-800/60 text-xs font-semibold uppercase tracking-wider text-slate-400">
+        <tr>
+          {headers.map(h => <th key={h} className="px-4 py-3 text-left">{h}</th>)}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row, i) => (
+          <tr key={i} className="border-t border-slate-800/50">
+            <td className="px-4 py-2.5 text-slate-400 text-xs font-medium whitespace-nowrap">{row[0]}</td>
+            {row.slice(1).map((cell, j) => (
+              <td key={j} className={`px-4 py-2.5 text-xs ${cell === 'baseline' ? 'text-slate-600 italic' : 'text-slate-300'}`}>{cell}</td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+);
+
+// ─── Page content ─────────────────────────────────────────────────────────────
+
+const PAGES = [
+  { id: 'quickstart', label: 'Quick Start',     icon: Play },
+  { id: 'setup',      label: 'Setup Checklist', icon: Settings },
+  { id: 'ab-method',  label: 'A/B Methodology', icon: BarChart3 },
+  { id: 'test-01',    label: 'TEST-01 — Offline fallback',  icon: Layers },
+  { id: 'test-02',    label: 'TEST-02 — Skeleton injection', icon: Layers },
+  { id: 'test-03',    label: 'TEST-03 — !full override',    icon: Layers },
+  { id: 'test-04',    label: 'TEST-04 — Hybrid context',    icon: Layers },
+  { id: 'test-05',    label: 'TEST-05 — Token reduction',   icon: Zap },
+  { id: 'test-06',    label: 'TEST-06 — PostCompact',       icon: RefreshCw },
+  { id: 'test-07',    label: 'TEST-07 — OCR pipeline',      icon: FileText },
+  { id: 'test-08',    label: 'TEST-08 — Graceful shutdown', icon: Activity },
+  { id: 'test-09',    label: 'TEST-09 — MCP tools',         icon: Cpu },
+  { id: 'test-10',    label: 'TEST-10 — Answer quality',    icon: Target },
+  { id: 'consistency',label: 'Consistency checks',          icon: AlertTriangle },
 ];
 
-// ─── Test Definitions ─────────────────────────────────────────────────────────
-function buildTests(c) {
-  const hook     = `python3 "${c.sieve}/bin/sieve-hook"`;
-  const hookCfg  = `${c.requests}/.claude/settings.json`;
-  const hookBak  = `${c.requests}/.claude/settings.json.bak`;
+function QuickStartPage() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-white mb-1">Quick Start</h2>
+        <p className="text-slate-400 text-sm">Run your first test in 5 minutes using the <code className="bg-slate-800 px-1.5 py-0.5 rounded text-slate-300">psf/requests</code> repo.</p>
+      </div>
 
-  const disableA = `python3 -c "import json; s=json.load(open('${hookCfg}')); s.setdefault('hooks',{}).pop('UserPromptSubmit',None); json.dump(s,open('${hookCfg}','w'),indent=2)" && echo "✓ Mode A ready — Sieve DISABLED"`;
-  const enableB  = `cp "${hookBak}" "${hookCfg}" && echo "✓ Mode B ready — Sieve ENABLED"`;
+      <Section title="1 — Clone the test project" accent>
+        <Code>{`git clone https://github.com/psf/requests /c/Users/avrha/Documents/projects/Sieve-testing/projects/requests
+cd /c/Users/avrha/Documents/projects/Sieve-testing/projects/requests`}</Code>
+      </Section>
 
-  return [
-    // ── Phase 0: Automated ───────────────────────────────────────────────────
-    {
-      id: 'pytest', phase: 0,
-      name: 'pytest — Full suite (31 tests)',
-      description: 'Validates the core pipeline. Run first — if any fail, stop here.',
-      type: 'shell',
-      cmd: `cd "${c.sieve}" && python3 -m pytest tests/ -v --tb=short 2>&1`,
-      timeout: 90,
-      score: (out, rc) => rc === 0
-        ? { status: 'pass', msg: out.match(/\d+ passed/)?.[0] || 'All passed' }
-        : { status: 'fail', msg: (out.match(/FAILED [^\n]+/g) || []).slice(0, 2).join(' | ') || 'Tests failed' },
-    },
-    {
-      id: 'benchmark', phase: 0,
-      name: 'pytest — Benchmark (74–89% reduction)',
-      description: 'Proves token reduction with semantic preservation across Python/JS/TS.',
-      type: 'shell',
-      cmd: `cd "${c.sieve}" && python3 -m pytest tests/test_benchmark.py -v -s 2>&1`,
-      timeout: 30,
-      score: (out, rc) => rc === 0
-        ? { status: 'pass', msg: '74–89% reduction confirmed' }
-        : { status: 'fail', msg: 'Benchmark assertions failed' },
-    },
+      <Section title="2 — Open two terminals">
+        <p className="text-sm text-slate-400 mb-3">Open two Git Bash windows.</p>
+        <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Terminal 1 — Sieve daemon</p>
+        <Code>{`cd /c/Users/avrha/Documents/projects/Sieve-testing/sieve
+source .venv/Scripts/activate
+python src/main.py /c/Users/avrha/Documents/projects/Sieve-testing/projects/requests`}</Code>
+        <Expected>Watching /c/Users/.../requests ...</Expected>
+        <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mt-4 mb-1">Terminal 2 — Test backend (for UI)</p>
+        <Code>{`cd /c/Users/avrha/Documents/projects/Sieve-testing/sieve
+source .venv/Scripts/activate
+python plan/server.py`}</Code>
+        <Expected>Sieve Test Runner API → http://127.0.0.1:8765</Expected>
+      </Section>
 
-    // ── Phase 1: Setup ───────────────────────────────────────────────────────
-    {
-      id: 'p1-check', phase: 1,
-      name: 'Verify all repos exist',
-      description: 'Checks sieve, requests, click, and httpx are cloned at the configured paths.',
-      type: 'shell',
-      cmd: [
-        `[ -d "${c.sieve}"    ] && echo "✓ sieve"    || echo "✗ sieve MISSING"`,
-        `[ -d "${c.requests}" ] && echo "✓ requests" || echo "✗ requests MISSING — git clone https://github.com/psf/requests ${c.requests}"`,
-        `[ -d "${c.click}"    ] && echo "✓ click"    || echo "✗ click MISSING — git clone https://github.com/pallets/click ${c.click}"`,
-        `[ -d "${c.httpx}"    ] && echo "✓ httpx"    || echo "✗ httpx MISSING — git clone https://github.com/encode/httpx ${c.httpx}"`,
-      ].join('\n'),
-      timeout: 10,
-      score: (out) => out.includes('✗')
-        ? { status: 'fail', msg: 'Some repos missing — see output' }
-        : { status: 'pass', msg: 'All four repos found' },
-    },
-    {
-      id: 'p1-hook', phase: 1,
-      name: 'Install Claude hook in requests repo',
-      description: 'Creates .claude/settings.json with hook config and saves a backup for A/B switching.',
-      type: 'shell',
-      cmd: `mkdir -p "${c.requests}/.claude"
-cat > "${c.requests}/.claude/settings.json" << 'EOF'
+      <Section title="3 — Trigger the cache">
+        <Code>{`touch /c/Users/avrha/Documents/projects/Sieve-testing/projects/requests/requests/api.py`}</Code>
+        <Note variant="info">Wait ~3 seconds. The daemon processes the file and writes its skeleton to ledger.db.</Note>
+      </Section>
+
+      <Section title="4 — Install the hook">
+        <p className="text-sm text-slate-400 mb-3">Run this once to register Sieve as a Claude Code hook in the requests project:</p>
+        <Code>{`mkdir -p /c/Users/avrha/Documents/projects/Sieve-testing/projects/requests/.claude
+cat > /c/Users/avrha/Documents/projects/Sieve-testing/projects/requests/.claude/settings.json << 'EOF'
 {
   "hooks": {
-    "UserPromptSubmit": [{"hooks": [{"command": "python3 ${c.sieve}/bin/sieve-hook --mode=prompt", "type": "command"}]}],
-    "PostCompact":      [{"hooks": [{"command": "python3 ${c.sieve}/bin/sieve-hook --mode=compact", "type": "command"}]}]
+    "UserPromptSubmit": [{"hooks": [{"command": "python3 /c/Users/avrha/Documents/projects/Sieve-testing/sieve/bin/sieve-hook --mode=prompt", "type": "command"}]}],
+    "PostCompact":      [{"hooks": [{"command": "python3 /c/Users/avrha/Documents/projects/Sieve-testing/sieve/bin/sieve-hook --mode=compact", "type": "command"}]}]
   }
 }
 EOF
-cp "${c.requests}/.claude/settings.json" "${hookBak}"
-echo "PASS: Hook installed + backup saved at ${hookBak}"`,
-      timeout: 10,
-      score: (out, rc) => out.includes('PASS')
-        ? { status: 'pass', msg: 'Hook ready, backup created' }
-        : { status: 'fail', msg: out.slice(-120) },
-    },
-    {
-      id: 'p1-cache', phase: 1,
-      name: 'Populate cache (daemon must be running)',
-      description: 'Touches all .py files to trigger daemon processing. Start daemon first.',
-      type: 'shell',
-      prereq: 'Start the daemon: python3 src/main.py /path/to/requests',
-      cmd: `find "${c.requests}" -name "*.py" | xargs touch
-echo "Waiting 12s for daemon to process..."
-sleep 12
-COUNT=$(python3 -c "import sqlite3,os; db='${c.requests}/ledger.db'; conn=sqlite3.connect(db) if os.path.exists(db) else None; print(conn.execute('SELECT COUNT(*) FROM context_cache').fetchone()[0] if conn else 0)" 2>/dev/null || echo 0)
-[ "$COUNT" -gt 5 ] && echo "PASS: Cache has $COUNT entries" || echo "WARN: Only $COUNT entries — start daemon first"`,
-      timeout: 25,
-      score: (out) => out.includes('PASS')
-        ? { status: 'pass', msg: out.match(/Cache has \d+ entries/)?.[0] || 'Populated' }
-        : { status: 'warn', msg: 'Start daemon then re-run' },
-    },
+cp /c/Users/avrha/Documents/projects/Sieve-testing/projects/requests/.claude/settings.json \
+   /c/Users/avrha/Documents/projects/Sieve-testing/projects/requests/.claude/settings.json.bak`}</Code>
+      </Section>
 
-    // ── Phase 2: Core ────────────────────────────────────────────────────────
-    {
-      id: 'test-01', phase: 2,
-      name: 'TEST-01 — Daemon offline fallback',
-      description: 'Hook must output file-tree heuristic when daemon is not running.',
-      type: 'shell',
-      prereq: 'Stop the daemon before running.',
-      cmd: `cd "${c.requests}" && SIEVE_PROMPT='list files' ${hook} --mode=prompt 2>&1`,
-      timeout: 10,
-      score: (out, rc) => (out.includes('daemon offline') || out.includes('file-tree heuristic'))
-        ? { status: 'pass', msg: 'Fallback triggered — file list injected' }
-        : { status: rc === 0 ? 'warn' : 'fail', msg: rc === 0 ? 'Daemon may still be running' : `Exit ${rc}` },
-    },
-    {
-      id: 'test-02', phase: 2,
-      name: 'TEST-02 — Skeleton injection',
-      description: 'Mode B should point to HTTPAdapter.send without you naming it. Mode A guesses.',
-      type: 'ab',
-      prompt: 'Where would I add retry logic to the HTTP request flow in requests/adapters.py?',
-      setupA: disableA, setupB: enableB,
-      groundTruth: 'Expected keywords: HTTPAdapter, adapters.py, .send()',
-      autoScore: (a, b) => {
-        if (!a || !b) return null;
-        const kw = ['httpadapter', 'adapters.py', '.send(', 'httpadapter.send'];
-        const bHits = kw.filter(k => b.toLowerCase().includes(k)).length;
-        const aHits = kw.filter(k => a.toLowerCase().includes(k)).length;
-        return bHits > aHits ? 'better' : bHits === aHits ? 'same' : 'worse';
-      },
-    },
-    {
-      id: 'test-03', phase: 2,
-      name: 'TEST-03 — !full override',
-      description: 'The !full command injects the complete raw file — bodies present, no ... placeholders.',
-      type: 'shell',
-      cmd: `cd "${c.requests}"
-OUT=$(SIEVE_PROMPT='!full requests/api.py' ${hook} --mode=prompt 2>&1)
-LINES=$(echo "$OUT" | wc -l)
-DOTS=$(echo "$OUT" | grep -c '    \.\.\.' || true)
-echo "Lines injected: $LINES"
-echo "Skeleton markers ('...'): $DOTS"
-echo "$OUT" | head -25
-[ "$LINES" -gt 50 ] && echo "PASS: Full file injected ($LINES lines)" || echo "FAIL: Only $LINES lines — may still be skeleton"`,
-      timeout: 10,
-      score: (out) => out.includes('PASS')
-        ? { status: 'pass', msg: out.match(/Full file injected \(\d+ lines\)/)?.[0] || 'Full file' }
-        : { status: 'fail', msg: 'Too few lines — skeleton may still be active' },
-    },
-    {
-      id: 'test-04', phase: 2,
-      name: 'TEST-04 — Hybrid context',
-      description: 'Naming a file injects it in full. Mode B explains impl details, Mode A cannot.',
-      type: 'ab',
-      prompt: 'Look at requests/adapters.py and explain step by step what the send() method does internally.',
-      setupA: disableA, setupB: enableB,
-      groundTruth: 'Expected implementation keywords: urllib3, pool, connection, timeout, socket, ssl',
-      autoScore: (a, b) => {
-        if (!a || !b) return null;
-        const impl = ['urllib3', 'connection', 'pool', 'timeout', 'socket', 'ssl', 'chunked'];
-        const bHits = impl.filter(w => b.toLowerCase().includes(w)).length;
-        const aHits = impl.filter(w => a.toLowerCase().includes(w)).length;
-        return bHits > aHits + 1 ? 'better' : bHits >= aHits ? 'same' : 'worse';
-      },
-    },
-    {
-      id: 'test-05', phase: 2,
-      name: 'TEST-05 — Token reduction',
-      description: 'Skeleton must achieve ≥70% reduction. Target: 10–30% of raw source size.',
-      type: 'shell',
-      cmd: `SIEVE_OUT=$(SIEVE_PROMPT='test' ${hook} --mode=prompt 2>/dev/null)
-SKEL=$(echo "$SIEVE_OUT" | wc -c)
-RAW=$(find "${c.requests}" -name "*.py" | xargs wc -c 2>/dev/null | tail -1 | awk '{print $1}')
-python3 -c "
-s=$SKEL; r=$RAW
-if r == 0: print('FAIL: could not read raw size'); exit(1)
-red=(1-s/r)*100
-print(f'Skeleton:  {s:>8,} chars')
-print(f'Raw total: {r:>8,} chars')
-print(f'Reduction: {red:.1f}%')
-if   70 <= red <= 95: print('PASS: in target range (70–95%)')
-elif red < 70:        print('FAIL: below 70% target')
-else:                 print('WARN: above 95% — check docstrings')
-"`,
-      timeout: 15,
-      score: (out) => {
-        const red = parseFloat(out.match(/Reduction: ([\d.]+)/)?.[1]);
-        if (isNaN(red)) return { status: 'fail', msg: 'Parse error' };
-        if (red >= 70 && red <= 95) return { status: 'pass', msg: `${red.toFixed(1)}% reduction ✓` };
-        return { status: red < 70 ? 'fail' : 'warn', msg: `${red.toFixed(1)}% — out of range` };
-      },
-    },
+      <Section title="5 — Open Claude Code in the test project">
+        <Code>{`cd /c/Users/avrha/Documents/projects/Sieve-testing/projects/requests
+claude`}</Code>
+        <Note variant="info">Claude Code must be opened from the <strong>requests</strong> directory so it picks up the .claude/settings.json hook.</Note>
+      </Section>
 
-    // ── Phase 3: Advanced ────────────────────────────────────────────────────
-    {
-      id: 'test-06', phase: 3,
-      name: 'TEST-06 — PostCompact re-injection',
-      description: 'After /compact, Mode B re-injects skeletons and still knows the codebase. Mode A goes blank.',
-      type: 'ab',
-      prompt: 'What are the main classes in this project and where are they defined? List exact file paths.',
-      setupA: `python3 -c "import json; s=json.load(open('${hookCfg}')); [s.setdefault('hooks',{}).pop(k,None) for k in ['UserPromptSubmit','PostCompact']]; json.dump(s,open('${hookCfg}','w'),indent=2)" && echo "✓ Mode A ready — ALL hooks disabled"`,
-      setupB: enableB,
-      note: 'Run /compact in Claude first, then send this prompt.',
-      groundTruth: 'Expected: Session, Request, Response, PreparedRequest, HTTPAdapter + their file paths',
-      autoScore: (a, b) => {
-        if (!a || !b) return null;
-        const cls = ['session', 'preparedrequest', 'httpadapter', 'adapters', 'sessions'];
-        const bH = cls.filter(c => b.toLowerCase().includes(c)).length;
-        const aH = cls.filter(c => a.toLowerCase().includes(c)).length;
-        return bH > aH ? 'better' : bH === aH ? 'same' : 'worse';
-      },
-    },
-    {
-      id: 'test-08', phase: 3,
-      name: 'TEST-08 — DB integrity after shutdown',
-      description: 'ledger.db must pass PRAGMA integrity_check after Ctrl+C.',
-      type: 'shell',
-      prereq: 'Kill the daemon (Ctrl+C) first, then run this check.',
-      cmd: `python3 -c "
+      <Section title="6 — Send your first test prompt">
+        <Prompt>What functions are available in requests/api.py?</Prompt>
+        <Expected>{`### requests/api.py
+def request(method, url, **kwargs):
+    """Constructs a Request..."""
+    ...
+
+def get(url, params=None, **kwargs):
+    """Sends a GET request."""
+    ...`}</Expected>
+        <p className="text-sm text-slate-400 mt-3">Claude should answer accurately from the injected skeleton — without you pasting any code.</p>
+      </Section>
+    </div>
+  );
+}
+
+function SetupPage() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-white mb-1">Setup Checklist</h2>
+        <p className="text-slate-400 text-sm">Complete all items before running any test. State is saved locally.</p>
+      </div>
+
+      <Section title="Before any test" accent>
+        <Checklist id="setup-main" items={[
+          'Daemon is running: python src/main.py /path/to/test-repo',
+          'Ollama is running (check system tray or ollama serve in a terminal)',
+          'Hook is registered in test-repo/.claude/settings.json (UserPromptSubmit + PostCompact)',
+          'At least one .py file has been touched to populate the cache',
+          'Cache is populated: python3 -c "import sqlite3; conn=sqlite3.connect(\'ledger.db\'); print(conn.execute(\'SELECT COUNT(*) FROM context_cache\').fetchone()[0], \'entries\')"',
+          'Test backend running: python plan/server.py (for automated tests only)',
+          'Claude Code is opened from inside the test repo directory',
+        ]} />
+      </Section>
+
+      <Section title="Verify cache is working">
+        <p className="text-sm text-slate-400 mb-2">Run this from inside the test repo:</p>
+        <Code>{`python3 -c "
 import sqlite3, os
-db = '${c.requests}/ledger.db'
+db = 'ledger.db'
 if not os.path.exists(db):
-    print('SKIP: no ledger.db yet (run some tests with daemon first)')
-    exit(0)
+    print('FAIL: ledger.db not found')
+else:
+    conn = sqlite3.connect(db)
+    cc = conn.execute('SELECT COUNT(*) FROM context_cache').fetchone()[0]
+    si = conn.execute('SELECT COUNT(*) FROM symbol_index').fetchone()[0]
+    print(f'context_cache: {cc} entries')
+    print(f'symbol_index:  {si} entries')
+    print('OK' if cc > 0 else 'WARN: cache empty — touch some .py files then wait 5s')
+"`}</Code>
+      </Section>
+
+      <Section title="A/B mode quick-switch commands">
+        <p className="text-sm text-slate-400 mb-2">Save these — you'll use them for every A/B test.</p>
+        <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Disable hook (Mode A — baseline)</p>
+        <Code>{`python3 -c "import json; s=json.load(open('.claude/settings.json')); s.setdefault('hooks',{}).pop('UserPromptSubmit',None); json.dump(s,open('.claude/settings.json','w'),indent=2)" && echo "✓ Mode A ready"`}</Code>
+        <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mt-4 mb-1">Re-enable hook (Mode B — Sieve ON)</p>
+        <Code>{`cp .claude/settings.json.bak .claude/settings.json && echo "✓ Mode B ready"`}</Code>
+      </Section>
+    </div>
+  );
+}
+
+function ABMethodPage() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-white mb-1">A/B Testing Methodology</h2>
+        <p className="text-slate-400 text-sm">How to run controlled comparisons and interpret the results.</p>
+      </div>
+
+      <Section title="The two modes" accent>
+        <div className="space-y-3">
+          <div className="bg-slate-800/50 border border-slate-700/40 rounded-xl px-4 py-3">
+            <p className="text-sm font-bold text-slate-300 mb-1">Mode A — No Sieve (baseline)</p>
+            <p className="text-sm text-slate-400">Hook disabled. Claude receives only your bare prompt — no file context injected. This is what every Claude Code user gets without Sieve.</p>
+          </div>
+          <div className="bg-blue-950/20 border border-blue-700/40 rounded-xl px-4 py-3">
+            <p className="text-sm font-bold text-slate-300 mb-1">Mode B — Sieve active</p>
+            <p className="text-sm text-slate-400">Hook enabled, daemon running with a populated cache. Claude receives your prompt + all file skeletons (or full file + skeletons for hybrid context).</p>
+          </div>
+        </div>
+      </Section>
+
+      <Section title="Scorecard — fill in for every A/B test">
+        <ABTable
+          headers={['Dimension', 'Mode A (no Sieve)', 'Mode B (with Sieve)']}
+          rows={[
+            ['Correct file located?', 'Y / N / N/A', 'Y / N / N/A'],
+            ['Answer correct?', 'Y / Partial / N', 'Y / Partial / N'],
+            ['Follow-ups needed', '[count]', '[count]'],
+            ['Hallucinated anything?', 'Y / N', 'Y / N'],
+            ['Context size (chars)', 'baseline', ''],
+            ['Verdict', '—', 'Better / Same / Worse'],
+            ['Reason', '—', '[one sentence]'],
+          ]}
+        />
+      </Section>
+
+      <Section title="Interpreting verdicts">
+        <ABTable
+          headers={['Verdict', 'Meaning', 'Action']}
+          rows={[
+            ['Better', 'Skeleton gives Claude enough structure to reason accurately', 'Ship ✓'],
+            ['Same', 'Compression without quality loss — token savings with no downside', 'Ship ✓'],
+            ['Worse — navigation', 'Skeleton stripped too much for structural reasoning', 'Add more context to skeletons'],
+            ['Worse — implementation', 'User needed full code, not just signature', 'User should use !full for this task class'],
+          ]}
+        />
+        <Note variant="info" className="mt-3">
+          <strong>Minimum runs to trust:</strong> 3 different prompts per test. If 2 of 3 are Same or Better, the test passes.
+        </Note>
+      </Section>
+
+      <Section title="Evaluation methods by test type">
+        <ABTable
+          headers={['Test type', 'Evaluation method', 'Objective?']}
+          rows={[
+            ['pytest suite', 'Pass/fail output', 'Yes — fully automated'],
+            ['Infrastructure (TEST-01, TEST-08)', 'Output format, DB integrity', 'Yes — scripted checks'],
+            ['Feature fires (TEST-03)', 'grep injected content', 'Yes — grep for expected string'],
+            ['OCR fires (TEST-07)', 'Did Claude quote screenshot text?', 'Human-visual'],
+            ['Navigation quality (TEST-02, TEST-04)', 'grep source for correct file/function', 'Yes — ground truth verifiable'],
+            ['Impact analysis (TEST-09, TEST-10)', 'Precision/recall against grep', 'Yes — scripted'],
+            ['Code generation (TEST-10)', 'Run pytest on generated code', 'Yes — execution-based'],
+          ]}
+        />
+        <Note variant="tip" className="mt-3">
+          <strong>General rule:</strong> if Claude names a file or function, <code className="bg-black/30 px-1 rounded">grep</code> the source to verify it exists. If Claude writes code, run it. Only use human judgment for inherently visual outputs (OCR quality, UI rendering).
+        </Note>
+      </Section>
+    </div>
+  );
+}
+
+function Test01Page() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-white mb-1">TEST-01 — Daemon offline fallback</h2>
+        <p className="text-slate-400 text-sm">Verify the hook still works and injects a file-tree heuristic when the daemon is not running.</p>
+      </div>
+      <Section title="Prerequisites">
+        <Checklist id="t01-pre" items={['Daemon is NOT running (stop it or don\'t start it)', 'Hook is registered in .claude/settings.json']} />
+      </Section>
+      <Section title="Steps" accent>
+        <ol className="space-y-3 text-sm text-slate-300">
+          <li className="flex gap-3"><span className="shrink-0 w-6 h-6 rounded-full bg-blue-600/30 text-blue-300 text-xs font-bold flex items-center justify-center">1</span>Make sure the daemon is stopped.</li>
+          <li className="flex gap-3"><span className="shrink-0 w-6 h-6 rounded-full bg-blue-600/30 text-blue-300 text-xs font-bold flex items-center justify-center">2</span>Open Claude Code in any project.</li>
+          <li className="flex gap-3"><span className="shrink-0 w-6 h-6 rounded-full bg-blue-600/30 text-blue-300 text-xs font-bold flex items-center justify-center">3</span>Submit any prompt.</li>
+        </ol>
+      </Section>
+      <Section title="Expected output — injected before your prompt">
+        <Expected>{`[sieve] daemon offline — file-tree heuristic
+  src/core/inference.py
+  src/daemon/watcher.py
+  src/main.py
+  ...`}</Expected>
+      </Section>
+      <Section title="What to check">
+        <Checklist id="t01-check" items={[
+          'Hook exits in <50ms — no hang before Claude responds',
+          'File list is accurate (matches actual project files up to MAX_DEPTH=3)',
+          'Claude still responds normally',
+        ]} />
+        <p className="text-sm text-slate-400 mt-3">Verify Claude saw it: ask <em>"What files do you know about?"</em> — the list should match what was injected.</p>
+      </Section>
+    </div>
+  );
+}
+
+function Test02Page() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-white mb-1">TEST-02 — Skeleton injection</h2>
+        <p className="text-slate-400 text-sm">Verify the cache is populated and file skeletons are injected into the prompt.</p>
+      </div>
+      <Section title="Prerequisites">
+        <Checklist id="t02-pre" items={['Daemon running', 'Cache populated (touch a .py file, wait 3s)', 'Hook enabled (Mode B)']} />
+      </Section>
+      <Section title="Steps" accent>
+        <ol className="space-y-3 text-sm text-slate-300">
+          <li className="flex gap-3"><span className="shrink-0 w-6 h-6 rounded-full bg-blue-600/30 text-blue-300 text-xs font-bold flex items-center justify-center">1</span>Open Claude Code in the requests repo.</li>
+          <li className="flex gap-3"><span className="shrink-0 w-6 h-6 rounded-full bg-blue-600/30 text-blue-300 text-xs font-bold flex items-center justify-center">2</span>Submit this prompt:</li>
+        </ol>
+        <Prompt>Where would I add retry logic to the HTTP request flow in requests/adapters.py?</Prompt>
+      </Section>
+      <Section title="Expected — Mode B should point directly to HTTPAdapter.send">
+        <Expected>{`### requests/adapters.py
+class HTTPAdapter:
+    """The built-in HTTP Adapter for urllib3."""
+
+    def send(self, request, stream=False, timeout=None, ...):
+        ...`}</Expected>
+        <p className="text-sm text-slate-400 mt-2">Claude should name <code className="bg-slate-800 px-1 rounded">HTTPAdapter.send()</code> without you telling it which file or class to look in.</p>
+      </Section>
+      <Section title="What to check">
+        <Checklist id="t02-check" items={[
+          'Function signatures are present in injected context',
+          'Function bodies are replaced with "..."',
+          'Docstrings are preserved',
+          'Mode A requires Claude to ask "which file?" or gives a generic answer',
+        ]} />
+      </Section>
+      <Section title="A/B comparison">
+        <p className="text-sm text-slate-400 mb-3">Run the same prompt in Mode A then Mode B. Verify with grep:</p>
+        <Code>{`grep -rn "HTTPAdapter" /c/.../requests/requests/`}</Code>
+        <ABTable rows={[
+          ['Correct file located?', '', ''],
+          ['Named HTTPAdapter.send()?', '', ''],
+          ['Follow-ups needed', '', ''],
+          ['Context size (chars)', '~60 (bare prompt)', 'wc -c on hook output'],
+          ['Verdict', 'baseline', ''],
+        ]} />
+      </Section>
+    </div>
+  );
+}
+
+function Test03Page() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-white mb-1">TEST-03 — !full override</h2>
+        <p className="text-slate-400 text-sm">Verify that <code className="bg-slate-800 px-1 rounded">!full &lt;path&gt;</code> injects the complete raw file instead of a skeleton.</p>
+      </div>
+      <Section title="Steps" accent>
+        <ol className="space-y-3 text-sm text-slate-300">
+          <li className="flex gap-3"><span className="shrink-0 w-6 h-6 rounded-full bg-blue-600/30 text-blue-300 text-xs font-bold flex items-center justify-center">1</span>Daemon can be running or stopped (doesn't matter for this test).</li>
+          <li className="flex gap-3"><span className="shrink-0 w-6 h-6 rounded-full bg-blue-600/30 text-blue-300 text-xs font-bold flex items-center justify-center">2</span>In Claude Code, send this prompt:</li>
+        </ol>
+        <Prompt>!full requests/api.py</Prompt>
+      </Section>
+      <Section title="Expected">
+        <Expected>{`### requests/api.py
+[complete file contents — every line, including all function bodies]
+
+def request(method, url, **kwargs):
+    """Constructs a :class:`Request <Request>`, ..."""
+    with sessions.Session() as session:
+        return session.request(method=method, url=url, **kwargs)
+...`}</Expected>
+      </Section>
+      <Section title="What to check">
+        <Checklist id="t03-check" items={[
+          'Full file body is present — no "..." placeholders',
+          'Line count matches actual file (wc -l requests/api.py)',
+          'Ask Claude: "What does the post() function do line by line?" — it should answer from implementation detail',
+        ]} />
+      </Section>
+      <Section title="Manual verification">
+        <Code>{`# Run the hook manually — output should have full file
+cd /c/Users/avrha/Documents/projects/Sieve-testing/projects/requests
+SIEVE_PROMPT='!full requests/api.py' \\
+  python3 /c/Users/avrha/Documents/projects/Sieve-testing/sieve/bin/sieve-hook --mode=prompt | head -40`}</Code>
+      </Section>
+    </div>
+  );
+}
+
+function Test04Page() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-white mb-1">TEST-04 — Hybrid context</h2>
+        <p className="text-slate-400 text-sm">Verify that files explicitly mentioned in the prompt are injected in full while all others remain skeletons.</p>
+      </div>
+      <Section title="Steps" accent>
+        <ol className="space-y-3 text-sm text-slate-300">
+          <li className="flex gap-3"><span className="shrink-0 w-6 h-6 rounded-full bg-blue-600/30 text-blue-300 text-xs font-bold flex items-center justify-center">1</span>Daemon running with populated cache.</li>
+          <li className="flex gap-3"><span className="shrink-0 w-6 h-6 rounded-full bg-blue-600/30 text-blue-300 text-xs font-bold flex items-center justify-center">2</span>Send a prompt that names a specific file:</li>
+        </ol>
+        <Prompt>Look at requests/adapters.py and explain step by step what the send() method does internally.</Prompt>
+      </Section>
+      <Section title="Expected">
+        <Expected>{`[sieve] hybrid context: 1 file(s) full, 12 skeleton(s)
+
+### requests/adapters.py [full]
+class HTTPAdapter:
+    def send(self, request, stream=False, ...):
+        # full implementation here — no "..." placeholders`}</Expected>
+      </Section>
+      <Section title="Three-mode A/B (this test has Mode C)">
+        <Note variant="warn">This test has three states. Run all three with the same prompt:</Note>
+        <Prompt>Explain exactly what happens inside the send() method in requests/adapters.py</Prompt>
+        <ABTable
+          headers={['Dimension', 'Mode A — bare', 'Mode B — all skeleton', 'Mode C — hybrid']}
+          rows={[
+            ['Correct method found?', '', '', ''],
+            ['Implementation detail?', '', '', ''],
+            ['Follow-ups needed', '', '', ''],
+            ['Context chars', '~70', '', ''],
+            ['Verdict vs Mode A', 'baseline', '', ''],
+          ]}
+        />
+        <p className="text-sm text-slate-400 mt-3"><strong className="text-slate-300">Expected pattern:</strong> Mode A struggles with implementation. Mode B knows the method exists but can't explain body. Mode C explains fully. This shows the exact value of each Sieve layer.</p>
+      </Section>
+    </div>
+  );
+}
+
+function Test05Page() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-white mb-1">TEST-05 — Token reduction measurement</h2>
+        <p className="text-slate-400 text-sm">Quantify how much Sieve compresses your codebase. Target: 70–93% reduction.</p>
+      </div>
+      <Section title="Measure skeleton output size" accent>
+        <Code>{`cd /c/Users/avrha/Documents/projects/Sieve-testing/projects/requests
+
+# 1. Capture skeleton output
+SIEVE_PROMPT='test' \\
+  python3 /c/Users/avrha/Documents/projects/Sieve-testing/sieve/bin/sieve-hook --mode=prompt > /tmp/sieve-out.txt
+
+# 2. Count skeleton chars
+wc -c /tmp/sieve-out.txt
+
+# 3. Count raw source chars
+find . -name "*.py" | xargs wc -c 2>/dev/null | tail -1
+
+# 4. Calculate reduction
+python3 -c "
+skel = int(input('Skeleton chars: '))
+raw  = int(input('Raw chars: '))
+print(f'Reduction: {(1 - skel/raw)*100:.1f}%')
+"`}</Code>
+      </Section>
+      <Section title="Expected">
+        <div className="space-y-2 text-sm">
+          <div className="flex items-center gap-3"><span className="w-32 text-slate-500">70–80%</span><span className="text-slate-300">Normal — files with long functions</span></div>
+          <div className="flex items-center gap-3"><span className="w-32 text-emerald-400 font-medium">80–93%</span><span className="text-slate-300">Excellent — heavy implementation files</span></div>
+          <div className="flex items-center gap-3"><span className="w-32 text-amber-400">Below 60%</span><span className="text-slate-300">Check for files with very long docstrings or constants</span></div>
+        </div>
+      </Section>
+      <Section title="A/B — what each token budget buys">
+        <Code>{`# Mode A — bare prompt only
+echo -n "What does requests/api.py export?" | wc -c
+
+# Mode B — with Sieve
+SIEVE_PROMPT='What does requests/api.py export?' \\
+  python3 .../sieve/bin/sieve-hook --mode=prompt > /tmp/b.txt
+wc -c /tmp/b.txt
+
+# Mode C (ceiling) — full file
+wc -c requests/api.py`}</Code>
+        <ABTable
+          headers={['Dimension', 'Mode A (~40 chars)', 'Mode B (skeleton)', 'Mode C (full file)']}
+          rows={[
+            ['Correct answer?', '', '', ''],
+            ['Names all exports?', '', '', ''],
+            ['Context chars', '~40', '', ''],
+            ['Verdict vs full file', 'baseline', '', 'ceiling'],
+          ]}
+        />
+        <Note variant="tip" className="mt-3"><strong>Goal:</strong> Mode B score should match Mode C at 10–30% of Mode C's token cost.</Note>
+      </Section>
+    </div>
+  );
+}
+
+function Test06Page() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-white mb-1">TEST-06 — PostCompact re-injection</h2>
+        <p className="text-slate-400 text-sm">Verify that after Claude compacts context, Sieve re-injects the architectural skeleton.</p>
+      </div>
+      <Note variant="warn">This is one of the <strong>highest-value A/B tests</strong> — context loss after /compact is a real daily pain point for Claude Code users.</Note>
+      <Section title="Steps" accent>
+        <ol className="space-y-3 text-sm text-slate-300">
+          <li className="flex gap-3"><span className="shrink-0 w-6 h-6 rounded-full bg-blue-600/30 text-blue-300 text-xs font-bold flex items-center justify-center">1</span>Start a long conversation until Claude compacts, or trigger it manually with <code className="bg-slate-800 px-1 rounded">/compact</code>.</li>
+          <li className="flex gap-3"><span className="shrink-0 w-6 h-6 rounded-full bg-blue-600/30 text-blue-300 text-xs font-bold flex items-center justify-center">2</span>Immediately after compact, send:</li>
+        </ol>
+        <Prompt>What are the main classes in this project and where are they defined? List exact file paths.</Prompt>
+      </Section>
+      <Section title="Expected">
+        <p className="text-sm text-slate-300">Claude should still name <code className="bg-slate-800 px-1 rounded">Session</code>, <code className="bg-slate-800 px-1 rounded">PreparedRequest</code>, <code className="bg-slate-800 px-1 rounded">HTTPAdapter</code> with their correct file paths — without you re-explaining the codebase.</p>
+      </Section>
+      <Section title="A/B comparison">
+        <p className="text-sm text-slate-400 mb-3">Run a long conversation in both modes until compact. Immediately after, ask the same question.</p>
+        <ABTable rows={[
+          ['Named correct files?', '', ''],
+          ['Named correct classes?', '', ''],
+          ['Had to re-explain structure?', 'Y (always)', 'N (Sieve re-injects)'],
+          ['Verdict', 'baseline', ''],
+        ]} />
+      </Section>
+    </div>
+  );
+}
+
+function Test07Page() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-white mb-1">TEST-07 — OCR pipeline</h2>
+        <p className="text-slate-400 text-sm">Verify screenshot text is extracted and injected. Requires rapidocr-onnxruntime (Python ≤3.13).</p>
+      </div>
+      <Note variant="warn">OCR requires Python 3.13 or earlier. If you're on Python 3.14, skip this test — rapidocr doesn't support 3.14 yet.</Note>
+      <Section title="Steps" accent>
+        <Code>{`# Copy any screenshot to the image cache directory
+mkdir -p ~/.claude/image-cache
+cp /path/to/any/screenshot.png ~/.claude/image-cache/`}</Code>
+        <p className="text-sm text-slate-400 mt-3">Then submit any prompt in Claude Code.</p>
+      </Section>
+      <Section title="Expected">
+        <Expected>{`[image: screenshot.png]
+• def calculate_total(items):
+• Returns sum after discount`}</Expected>
+      </Section>
+      <Section title="A/B — does Claude actually use the OCR text?">
+        <p className="text-sm text-slate-400 mb-3">Take a screenshot of a stack trace or error. Place in <code className="bg-slate-800 px-1 rounded">~/.claude/image-cache/</code>. Run both modes:</p>
+        <Prompt>What does this error mean and how do I fix it?</Prompt>
+        <ABTable rows={[
+          ['Claude referenced image content?', 'N (didn\'t see it)', ''],
+          ['Answer used the specific error?', 'N / generic', ''],
+          ['Needed follow-up to paste content?', 'Y', ''],
+          ['Verdict', 'baseline', ''],
+        ]} />
+        <Note variant="info">This is a <strong>visual check</strong>, not a judgment call — either the OCR text appears in Claude's response verbatim or it doesn't.</Note>
+      </Section>
+    </div>
+  );
+}
+
+function Test08Page() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-white mb-1">TEST-08 — Graceful shutdown</h2>
+        <p className="text-slate-400 text-sm">Verify the daemon exits cleanly without corrupting ledger.db.</p>
+      </div>
+      <Section title="Steps" accent>
+        <ol className="space-y-3 text-sm text-slate-300">
+          <li className="flex gap-3"><span className="shrink-0 w-6 h-6 rounded-full bg-blue-600/30 text-blue-300 text-xs font-bold flex items-center justify-center">1</span>Start the daemon.</li>
+          <li className="flex gap-3"><span className="shrink-0 w-6 h-6 rounded-full bg-blue-600/30 text-blue-300 text-xs font-bold flex items-center justify-center">2</span>Save several files rapidly to create processing load.</li>
+          <li className="flex gap-3"><span className="shrink-0 w-6 h-6 rounded-full bg-blue-600/30 text-blue-300 text-xs font-bold flex items-center justify-center">3</span>Press <kbd className="bg-slate-700 px-1.5 py-0.5 rounded text-xs">Ctrl+C</kbd> while files are being processed.</li>
+        </ol>
+        <Expected>Shutdown signal received — processor exiting</Expected>
+      </Section>
+      <Section title="Verify DB integrity">
+        <Code>{`python3 -c "
+import sqlite3, os
+db = 'ledger.db'
 conn = sqlite3.connect(db)
 r = conn.execute('PRAGMA integrity_check').fetchone()
-if r[0] == 'ok':
-    rows = conn.execute('SELECT COUNT(*) FROM context_cache').fetchone()[0]
-    print(f'PASS: DB integrity OK — {rows} cache entries preserved')
-else:
-    print(f'FAIL: {r[0]}')
-"`,
-      timeout: 10,
-      score: (out) => out.includes('PASS')
-        ? { status: 'pass', msg: out.match(/\d+ cache entries/)?.[0] || 'DB OK' }
-        : out.includes('SKIP')
-          ? { status: 'warn', msg: 'No DB yet' }
-          : { status: 'fail', msg: 'DB corrupted' },
-    },
+rows = conn.execute('SELECT COUNT(*) FROM context_cache').fetchone()[0]
+print(f'Integrity: {r[0]}')
+print(f'Cache entries: {rows}')
+"`}</Code>
+        <Expected>Integrity: ok
+Cache entries: [some number]</Expected>
+      </Section>
+      <Section title="What to check">
+        <Checklist id="t08-check" items={[
+          'Daemon logs "shutdown signal received" — no Python traceback',
+          'integrity_check returns "ok"',
+          'No cache entries were lost (count before and after)',
+        ]} />
+      </Section>
+    </div>
+  );
+}
 
-    // ── Phase 4: Answer Quality ──────────────────────────────────────────────
-    {
-      id: 't10-p1', phase: 4,
-      name: 'PROMPT-1 — Navigation (keyword check)',
-      description: 'Mode B should name adapters.py + HTTPAdapter.send. Auto-checked via keyword matching.',
-      type: 'ab',
-      prompt: 'Where would I add support for a custom certificate authority in the requests library?\nReply with ONLY a JSON object: {"files": ["..."], "functions": ["..."]}',
-      setupA: disableA, setupB: enableB,
-      groundTruth: '{"files":["requests/adapters.py","requests/sessions.py"],"functions":["HTTPAdapter.send","Session.merge_environment_settings"]}',
-      autoScore: (a, b) => {
-        if (!b) return null;
-        const gt = ['adapters.py', 'httpadapter', 'send', 'merge_environment'];
-        const bH = gt.filter(k => b.toLowerCase().includes(k)).length;
-        const aH = gt.filter(k => (a || '').toLowerCase().includes(k)).length;
-        if (bH >= 3) return 'better';
-        if (bH >= 1 && bH >= aH) return 'same';
-        return 'worse';
-      },
-    },
-    {
-      id: 't10-p2', phase: 4,
-      name: 'PROMPT-2 — Impact analysis (precision / recall)',
-      description: 'Paste Claude\'s JSON array. Click "Score" to run automated precision/recall against grep.',
-      type: 'ab-precision',
-      prompt: 'If I rename the PreparedRequest class to CompiledRequest, what other files in the codebase would need updating?\nReply with ONLY a JSON array: ["file1.py", "file2.py", ...]',
-      setupA: disableA, setupB: enableB,
-      groundTruthCmd: `cd "${c.requests}" && grep -rl 'PreparedRequest' . --include="*.py" | sed 's|^./||' | sort`,
-    },
-    {
-      id: 't10-p3', phase: 4,
-      name: 'PROMPT-3 — Write a test (run pytest)',
-      description: 'Paste Claude\'s generated test code. Click "Run Code" to execute pytest.',
-      type: 'ab-code',
-      prompt: 'Write a pytest unit test for requests.get() that mocks the HTTP call.\nMust: import from requests directly, mock requests.adapters.HTTPAdapter.send, assert .status_code exists.\nOutput ONLY the Python code.',
-      setupA: disableA, setupB: enableB,
-      runCode: (code, mode) =>
-        `cat > /tmp/t10p3_${mode}.py << 'PYEOF'\n${code}\nPYEOF\ncd "${c.requests}" && python3 -m pytest /tmp/t10p3_${mode}.py -v --tb=short 2>&1`,
-      scoreCode: (out, rc) => rc === 0
-        ? { status: 'pass', msg: 'pytest passed ✓' }
-        : { status: 'fail', msg: out.match(/E\s+\w+Error[^\n]*/)?.[0]?.slice(0, 60) || 'pytest failed' },
-    },
-    {
-      id: 't10-p5', phase: 4,
-      name: 'PROMPT-5 — Implementation (ast + pytest)',
-      description: 'Paste Claude\'s modified get() function. Click "Run Code" to validate parameter + loop.',
-      type: 'ab-code',
-      prompt: 'Add a retry_on_status parameter to requests.get() that retries on HTTP 429 or 503, up to 3 times.\nShow only the complete modified get() function.\nOutput ONLY Python code.',
-      setupA: disableA, setupB: enableB,
-      runCode: (code, mode) =>
-        `cat > /tmp/t10p5_${mode}.py << 'PYEOF'\n${code}\nPYEOF\npython3 - << 'EOF'\nimport ast, sys\ntry: tree=ast.parse(open('/tmp/t10p5_${mode}.py').read())\nexcept SyntaxError as e: print(f'FAIL: syntax error — {e}'); sys.exit(1)\nfns=[n for n in ast.walk(tree) if isinstance(n,ast.FunctionDef) and n.name=='get']\nif not fns: print('FAIL: no get() function found'); sys.exit(1)\nargs=[a.arg for a in fns[0].args.args+fns[0].args.kwonlyargs]\nprint('PASS: retry_on_status present' if 'retry_on_status' in args else 'FAIL: retry_on_status missing')\nsrc=open('/tmp/t10p5_${mode}.py').read().lower()\nprint('PASS: retry loop found' if any(k in src for k in ['for ','while ','range(']) else 'WARN: no retry loop')\nEOF`,
-      scoreCode: (out, rc) => {
-        const allPass = (out.match(/PASS/g) || []).length;
-        const fails = (out.match(/FAIL/g) || []).length;
-        if (fails > 0) return { status: 'fail', msg: out.match(/FAIL:[^\n]*/)?.[0]?.slice(0, 60) || 'Failed' };
-        return allPass >= 2 ? { status: 'pass', msg: 'Parameter + loop verified ✓' } : { status: 'warn', msg: 'Partial — check output' };
-      },
-    },
+function Test09Page() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-white mb-1">TEST-09 — MCP tools</h2>
+        <p className="text-slate-400 text-sm">Verify the dependency graph and route matching tools work via MCP.</p>
+      </div>
+      <Section title="Prerequisites">
+        <Checklist id="t09-pre" items={[
+          'Daemon has run and populated symbol_index',
+          'Check: python3 -c "import sqlite3; conn=sqlite3.connect(\'ledger.db\'); print(conn.execute(\'SELECT COUNT(*) FROM symbol_index\').fetchone()[0], \'symbols\')"',
+          'MCP server is started: python3 -m src.mcp.server',
+          'Claude Code is configured to use the MCP server',
+        ]} />
+      </Section>
+      <Section title="Steps" accent>
+        <Prompt>What are the dependencies of requests/adapters.py?</Prompt>
+      </Section>
+      <Section title="Expected">
+        <p className="text-sm text-slate-300">A nested dependency graph showing which files <code className="bg-slate-800 px-1 rounded">adapters.py</code> imports and what those files import in turn.</p>
+      </Section>
+      <Section title="Three-mode A/B">
+        <Prompt>If I change the json parameter handling in requests/api.py, which other files could be affected?</Prompt>
+        <ABTable
+          headers={['Dimension', 'Mode A — bare', 'Mode B — skeleton only', 'Mode C — MCP + skeleton']}
+          rows={[
+            ['Named affected files?', '', '', ''],
+            ['Traced multi-hop deps?', '', '', ''],
+            ['Precision vs grep', '', '', ''],
+            ['Verdict', 'baseline', '', ''],
+          ]}
+        />
+        <p className="text-sm text-slate-400 mt-3">Verify with: <code className="bg-slate-800 px-1 rounded">grep -rn "api" /c/.../requests/requests/</code> and compare files Claude named against grep output.</p>
+      </Section>
+    </div>
+  );
+}
 
-    // ── Phase 5: Edge Cases ──────────────────────────────────────────────────
-    {
-      id: 'edge-big', phase: 5,
-      name: 'Big file (>100KB) — silently skipped',
-      type: 'shell',
-      cmd: `dd if=/dev/zero bs=1024 count=150 2>/dev/null | tr '\\0' 'x' > "${c.requests}/bigfile_test.py"
-sleep 3
-OUT=$(SIEVE_PROMPT='test' ${hook} --mode=prompt 2>/dev/null)
-rm -f "${c.requests}/bigfile_test.py"
-echo "$OUT" | grep -q "bigfile_test" && echo "FAIL: big file appeared in context" || echo "PASS: big file correctly skipped"`,
-      timeout: 20,
-      score: (out) => out.includes('PASS') ? { status: 'pass', msg: 'Big file skipped' } : { status: 'fail', msg: 'Big file in context' },
-    },
-    {
-      id: 'edge-syntax', phase: 5,
-      name: 'Syntax error — no crash',
-      type: 'shell',
-      cmd: `echo "def foo(:" > "${c.requests}/syntax_test.py"
-sleep 3
-SIEVE_PROMPT='test' ${hook} --mode=prompt > /dev/null 2>&1
-RC=$?
-rm -f "${c.requests}/syntax_test.py"
-[ $RC -eq 0 ] && echo "PASS: hook exits cleanly after syntax error file" || echo "FAIL: hook crashed (exit $RC)"`,
-      timeout: 15,
-      score: (out) => out.includes('PASS') ? { status: 'pass', msg: 'No crash' } : { status: 'fail', msg: 'Crash detected' },
-    },
-    {
-      id: 'edge-rapid', phase: 5,
-      name: 'Rapid saves — AST hash gate fires',
-      type: 'shell',
-      prereq: 'Daemon must be running with visible logs.',
-      cmd: `LOG=/tmp/sieve_rapid_$$.log
-python3 "${c.sieve}/src/main.py" "${c.requests}" >"$LOG" 2>&1 &
-DPID=$!; sleep 2
-for i in $(seq 1 10); do touch "${c.requests}/requests/api.py"; done
-sleep 8
-kill $DPID 2>/dev/null; wait $DPID 2>/dev/null
-SKIP=$(grep -c "AST unchanged" "$LOG" 2>/dev/null || echo 0)
-UPD=$(grep -c "Cache updated" "$LOG" 2>/dev/null || echo 0)
-echo "AST unchanged (skipped): $SKIP"
-echo "Cache updated (Ollama):  $UPD"
-rm -f "$LOG"
-[ "$SKIP" -ge 9 ] && echo "PASS: hash gate fired $SKIP times (saved $SKIP Ollama calls)" || echo "WARN: only $SKIP skips — gate may not be working"`,
-      timeout: 25,
-      score: (out) => {
-        const skip = parseInt(out.match(/skipped\): (\d+)/)?.[1] || 0);
-        return skip >= 9
-          ? { status: 'pass', msg: `Gate fired ${skip}×` }
-          : { status: 'warn', msg: `Only ${skip} skips` };
-      },
-    },
+function Test10Page() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-white mb-1">TEST-10 — Answer quality</h2>
+        <p className="text-slate-400 text-sm">Comprehensive objective evaluation of answer quality with and without Sieve.</p>
+      </div>
 
-    // ── Phase 6: Consistency ─────────────────────────────────────────────────
-    {
-      id: 'cons-01', phase: 6,
-      name: 'CONSISTENCY-01 — Skeleton determinism (5 runs)',
-      type: 'shell',
-      cmd: `cd "${c.requests}"
-for i in 1 2 3 4 5; do
-  SIEVE_PROMPT='test' ${hook} --mode=prompt > /tmp/sieve_r$i.txt 2>/dev/null
-  sleep 1
-done
-DIFFS=0
+      <Section title="PROMPT-1 — Structural JSON response (grep-verifiable)" accent>
+        <Prompt>{`List the top-5 most-imported modules in the requests codebase.
+For each, return a JSON object: {"module": "name", "imported_by": ["file1", "file2"]}.
+Return only the JSON array, no prose.`}</Prompt>
+        <Code>{`# Verify each file Claude named actually exists:
+python3 -c "
+import json, subprocess
+response = '''[paste Claude's JSON here]'''
+data = json.loads(response)
+for item in data:
+    for f in item.get('imported_by', []):
+        p = f.lstrip('./')
+        result = subprocess.run(['find', '.', '-name', p.split('/')[-1]], capture_output=True, text=True)
+        status = '✓' if result.stdout.strip() else '✗ NOT FOUND'
+        print(f'{status}  {p}')
+"`}</Code>
+        <Note variant="info">Pass = all named files exist in the repo.</Note>
+      </Section>
+
+      <Section title="PROMPT-2 — Precision/recall against ground truth">
+        <Prompt>List every Python file in the requests/ subdirectory. Return just the file paths, one per line, no prose.</Prompt>
+        <Code>{`# Ground truth (run this yourself):
+find /c/Users/avrha/Documents/projects/Sieve-testing/projects/requests/requests \\
+  -name "*.py" | sed 's|.*/requests/||'
+
+# Then compare Claude's list to ground truth
+python3 -c "
+gt = set(open('ground_truth.txt').read().strip().splitlines())
+cl = set(open('claude_answer.txt').read().strip().splitlines())
+cl = {p.lstrip('./') for p in cl}
+tp = len(gt & cl)
+print(f'Precision: {tp/len(cl)*100:.0f}%')
+print(f'Recall:    {tp/len(gt)*100:.0f}%')
+print(f'Missing:  {gt - cl}')
+print(f'Extra:    {cl - gt}')
+"`}</Code>
+        <Note variant="info">Pass = Precision ≥80% and Recall ≥80%.</Note>
+      </Section>
+
+      <Section title="PROMPT-3 — Code generation (execution-based)">
+        <Prompt>{`Write a Python function that fetches a URL using the requests library,
+retries up to 3 times on connection errors, and returns the response text.
+Include a pytest test for it that mocks requests.get.`}</Prompt>
+        <Code>{`# Save Claude's code to /tmp/test_fetch.py then run:
+python3 -m pytest /tmp/test_fetch.py -v`}</Code>
+        <Note variant="info">Pass = pytest exits 0 (all tests pass).</Note>
+      </Section>
+
+      <Section title="PROMPT-4 — LLM-as-judge">
+        <p className="text-sm text-slate-400 mb-2">Use Ollama to evaluate whether Claude's answer about a specific implementation is correct:</p>
+        <Code>{`ollama run qwen2.5-coder:1.5b "
+You are evaluating an AI answer about the requests library source code.
+Question: 'How does HTTPAdapter.send() handle SSL verification?'
+Correct answer must mention: verify parameter, ssl_context, cert, urllib3.
+Score the following answer 0-10 for factual accuracy.
+
+Answer: [paste Claude's response here]
+
+Reply with just: SCORE: X/10 VERDICT: pass|fail
+"`}</Code>
+        <Note variant="info">Pass = Score ≥ 7/10.</Note>
+      </Section>
+
+      <Section title="PROMPT-5 — AST structural check">
+        <Prompt>{`Write a Python function called process_items(items) that loops over items,
+skips None values, and returns a list of processed results.`}</Prompt>
+        <Code>{`python3 -c "
+import ast, sys
+src = open('/tmp/claude_code.py').read()
+tree = ast.parse(src)
+has_param = any(
+    arg.arg == 'items'
+    for node in ast.walk(tree)
+    if isinstance(node, ast.FunctionDef) and node.name == 'process_items'
+    for arg in node.args.args
+)
+has_loop = any(isinstance(n, (ast.For, ast.While)) for n in ast.walk(tree))
+print('✓ param' if has_param else '✗ missing items param')
+print('✓ loop' if has_loop else '✗ missing loop')
+"`}</Code>
+        <Note variant="info">Pass = both checks print ✓.</Note>
+      </Section>
+    </div>
+  );
+}
+
+function ConsistencyPage() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-white mb-1">Consistency Checks</h2>
+        <p className="text-slate-400 text-sm">Verify the hook behaves identically across repeated runs and edge cases.</p>
+      </div>
+
+      <Section title="CONSISTENCY-01 — Determinism (5 runs, identical output)" accent>
+        <Code>{`cd /c/Users/avrha/Documents/projects/Sieve-testing/projects/requests
+SIEVE_PROMPT='test' python3 .../sieve/bin/sieve-hook --mode=prompt > /tmp/sieve_r1.txt
 for i in 2 3 4 5; do
-  diff -q /tmp/sieve_r1.txt /tmp/sieve_r$i.txt >/dev/null 2>&1 || DIFFS=$((DIFFS+1))
-done
-[ $DIFFS -eq 0 ] && echo "PASS: All 5 runs produce identical output" || echo "FAIL: $DIFFS run(s) differ"`,
-      timeout: 30,
-      score: (out) => out.includes('PASS') ? { status: 'pass', msg: '5/5 identical' } : { status: 'fail', msg: 'Non-deterministic output' },
-    },
-    {
-      id: 'cons-02', phase: 6,
-      name: 'CONSISTENCY-02 — Latency stability (10 runs, p100 <50ms)',
-      type: 'shell',
-      cmd: `cd "${c.requests}"
-OVER=0; MAX=0
+  SIEVE_PROMPT='test' python3 .../sieve/bin/sieve-hook --mode=prompt > /tmp/sieve_r$i.txt
+  diff -q /tmp/sieve_r1.txt /tmp/sieve_r$i.txt >/dev/null 2>&1 && echo "Run $i: identical" || echo "Run $i: DIFFERS"
+done`}</Code>
+        <Note variant="info">Pass = all 5 runs produce identical output.</Note>
+      </Section>
+
+      <Section title="CONSISTENCY-02 — Latency stability (10 runs, p100 &lt;50ms)">
+        <Code>{`OVER=0; MAX=0
 for i in $(seq 1 10); do
   S=$(date +%s%N)
-  SIEVE_PROMPT='test' ${hook} --mode=prompt >/dev/null 2>&1
+  SIEVE_PROMPT='test' python3 .../sieve/bin/sieve-hook --mode=prompt >/dev/null 2>&1
   E=$(date +%s%N)
   MS=$(( (E-S)/1000000 ))
   [ $MS -gt $MAX ] && MAX=$MS
-  echo "Run $i: \${MS}ms$([ $MS -gt 50 ] && echo ' ← OVER LIMIT')"
+  echo "Run $i: ${MS}ms"
   [ $MS -gt 50 ] && OVER=$((OVER+1))
 done
-echo "---"
-echo "Peak: \${MAX}ms"
-[ $OVER -eq 0 ] && echo "PASS: All 10 runs under 50ms" || echo "FAIL: $OVER run(s) exceeded 50ms"`,
-      timeout: 60,
-      score: (out) => {
-        const max = parseInt(out.match(/Peak: (\d+)ms/)?.[1] || 0);
-        return out.includes('PASS')
-          ? { status: 'pass', msg: `p100 = ${max}ms` }
-          : { status: 'fail', msg: `Peak = ${max}ms > 50ms` };
-      },
-    },
-    {
-      id: 'cons-03', phase: 6,
-      name: 'CONSISTENCY-03 — Cross-project reduction (requests/click/httpx)',
-      type: 'shell',
-      cmd: `for PROJECT in "${c.requests}" "${c.click}" "${c.httpx}"; do
-  NAME=$(basename "$PROJECT")
-  find "$PROJECT" -name "*.py" | head -30 | xargs touch 2>/dev/null
-  sleep 8
-  SKEL=$(SIEVE_PROMPT='test' ${hook} --mode=prompt 2>/dev/null | wc -c)
-  RAW=$(find "$PROJECT" -name "*.py" | head -30 | xargs wc -c 2>/dev/null | tail -1 | awk '{print $1}')
-  python3 -c "
-s=$SKEL; r=$RAW; n='$NAME'
-if r==0: print(f'{n}: SKIP (no files)'); exit()
-red=(1-s/r)*100
-print(f'{n}: {red:.1f}% reduction (skeleton {s:,} / raw {r:,})')
-print(f'  PASS' if red>=70 else '  WARN: below 70%')
-"
-done`,
-      timeout: 90,
-      score: (out) => {
-        const pct = out.match(/\d+\.\d+% reduction/g) || [];
-        const all = pct.every(p => parseFloat(p) >= 70);
-        return all && pct.length === 3
-          ? { status: 'pass', msg: pct.map(p => p.split('%')[0] + '%').join(' | ') }
-          : { status: 'warn', msg: pct.length < 3 ? 'Some projects not populated' : 'One or more below 70%' };
-      },
-    },
-    {
-      id: 'cons-06', phase: 6,
-      name: 'CONSISTENCY-06 — AST hash gate (comment vs structural change)',
-      type: 'shell',
-      cmd: `cd "${c.requests}"
-LOG=/tmp/sieve_ast_$$.log
-python3 "${c.sieve}/src/main.py" "${c.requests}" >"$LOG" 2>&1 &
+echo "Peak: ${MAX}ms — ${OVER} run(s) over 50ms"`}</Code>
+        <Note variant="info">Pass = zero runs exceed 50ms. Warn if 1–2 exceed. Fail if 3+.</Note>
+      </Section>
+
+      <Section title="CONSISTENCY-03 — Cross-project reduction">
+        <p className="text-sm text-slate-400 mb-2">Verify 70%+ reduction across all three test repos.</p>
+        <Code>{`for repo in requests click httpx; do
+  PROJ=/c/Users/avrha/Documents/projects/Sieve-testing/projects/$repo
+  SIEVE_PROMPT='test' python3 .../sieve/bin/sieve-hook --mode=prompt > /tmp/sk_$repo.txt 2>/dev/null
+  SKEL=$(wc -c < /tmp/sk_$repo.txt)
+  RAW=$(find $PROJ -name "*.py" | xargs wc -c 2>/dev/null | tail -1 | awk '{print $1}')
+  python3 -c "print(f'$repo: {(1-$SKEL/$RAW)*100:.1f}% reduction')"
+done`}</Code>
+        <Note variant="info">Pass = all three repos show ≥70% reduction.</Note>
+      </Section>
+
+      <Section title="CONSISTENCY-06 — AST hash gate">
+        <p className="text-sm text-slate-400 mb-2">Verify comment-only edits are skipped; structural changes trigger re-summary.</p>
+        <Code>{`LOG=/tmp/sieve_ast_test.log
+python3 .../sieve/src/main.py .../requests >"$LOG" 2>&1 &
 DPID=$!; sleep 2
 
-# Test 1: comment only — should NOT call Ollama
+# Test 1: comment only — should NOT trigger re-summary
 echo "# sieve hash test $(date +%s)" >> requests/api.py
 sleep 5
 
-# Test 2: new function — SHOULD call Ollama
+# Test 2: new function — SHOULD trigger re-summary
 printf "\\ndef _sieve_hash_test():\\n    return True\\n" >> requests/api.py
 sleep 7
 
@@ -456,516 +871,48 @@ SKIP=$(grep -c "AST unchanged" "$LOG" 2>/dev/null || echo 0)
 UPD=$(grep -c "Cache updated" "$LOG" 2>/dev/null || echo 0)
 echo "AST unchanged (skipped): $SKIP"
 echo "Cache updated (processed): $UPD"
+git checkout requests/api.py 2>/dev/null || true
 rm -f "$LOG"
-git -C "${c.requests}" checkout requests/api.py 2>/dev/null || true
-[ "$SKIP" -ge 1 ] && [ "$UPD" -ge 1 ] && echo "PASS: comment skipped, structural change processed" || echo "FAIL: skip=$SKIP update=$UPD"`,
-      timeout: 30,
-      score: (out) => out.includes('PASS')
-        ? { status: 'pass', msg: 'Hash gate working correctly' }
-        : { status: 'fail', msg: out.match(/skip=\d+ update=\d+/)?.[0] || 'Gate not working' },
-    },
-  ];
+[ "$SKIP" -ge 1 ] && [ "$UPD" -ge 1 ] && echo "PASS" || echo "FAIL: skip=$SKIP update=$UPD"`}</Code>
+        <Note variant="info">Pass = SKIP ≥ 1 and UPD ≥ 1.</Note>
+      </Section>
+    </div>
+  );
 }
 
-// ─── API ──────────────────────────────────────────────────────────────────────
-async function callBackend(cmd, timeout = 60) {
-  const res = await fetch(`${BACKEND}/run`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ command: cmd, timeout }),
-  });
-  const d = await res.json();
-  return {
-    output: (d.stdout || '') + (d.stderr ? '\n' + d.stderr : ''),
-    returncode: d.returncode,
-    ok: d.ok,
-  };
-}
-
-// ─── Small UI pieces ──────────────────────────────────────────────────────────
-const OutputPane = ({ output, status }) => (
-  <div className={`rounded-xl border text-xs font-mono p-4 whitespace-pre-wrap overflow-auto max-h-80 leading-relaxed mt-4
-    ${status === 'pass' ? 'bg-emerald-950/20 border-emerald-800/50' : status === 'fail' ? 'bg-red-950/20 border-red-800/50' : status === 'warn' ? 'bg-amber-950/20 border-amber-800/50' : 'bg-slate-900/60 border-slate-700/50'}`}>
-    {output
-      ? <span className="text-slate-200 leading-6">{output}</span>
-      : <span className="text-slate-500 italic">No output yet — click Run</span>}
-  </div>
-);
-
-const Badge = ({ status, msg }) => {
-  const s = {
-    pass:    'bg-emerald-500/15 text-emerald-300 border-emerald-600/50',
-    fail:    'bg-red-500/15     text-red-300     border-red-600/50',
-    warn:    'bg-amber-500/15   text-amber-300   border-amber-600/50',
-    better:  'bg-emerald-500/15 text-emerald-300 border-emerald-600/50',
-    same:    'bg-blue-500/15    text-blue-300    border-blue-600/50',
-    worse:   'bg-red-500/15     text-red-300     border-red-600/50',
-    partial: 'bg-purple-500/15  text-purple-300  border-purple-600/50',
-  };
-  const ic = { pass: '✓', fail: '✗', warn: '⚠', better: '↑', same: '=', worse: '↓', partial: '~' };
-  return (
-    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg border text-xs font-semibold ${s[status] || 'bg-slate-800 text-slate-400 border-slate-600'}`}>
-      {ic[status] || '○'} {msg || status || '—'}
-    </span>
-  );
+// ─── Page map ────────────────────────────────────────────────────────────────
+const PAGE_COMPONENTS = {
+  quickstart:  QuickStartPage,
+  setup:       SetupPage,
+  'ab-method': ABMethodPage,
+  'test-01':   Test01Page,
+  'test-02':   Test02Page,
+  'test-03':   Test03Page,
+  'test-04':   Test04Page,
+  'test-05':   Test05Page,
+  'test-06':   Test06Page,
+  'test-07':   Test07Page,
+  'test-08':   Test08Page,
+  'test-09':   Test09Page,
+  'test-10':   Test10Page,
+  consistency: ConsistencyPage,
 };
 
-const CopyBtn = ({ text, label = 'Copy' }) => {
-  const [done, setDone] = useState(false);
-  return (
-    <button
-      onClick={() => navigator.clipboard.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 2000); }).catch(() => {})}
-      className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-600/50 hover:border-slate-500 text-xs text-slate-300 hover:text-white rounded-lg transition-all shrink-0"
-    >
-      {done ? <><Check size={11} className="text-emerald-400" /> Copied!</> : <><Copy size={11} /> {label}</>}
-    </button>
-  );
-};
-
-const RunBtn = ({ onClick, running, label = 'Run' }) => (
-  <button
-    onClick={onClick}
-    disabled={running}
-    className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-xl shadow-lg shadow-blue-900/30 transition-all shrink-0"
-  >
-    {running
-      ? <><RefreshCw size={14} className="animate-spin" /> Running…</>
-      : <><Play size={14} /> {label}</>}
-  </button>
-);
-
-// ─── Shell Test Card ──────────────────────────────────────────────────────────
-const ShellCard = ({ test, result, running, onRun }) => {
-  const score = result?.score;
-  const borderColor = score?.status === 'pass' ? 'border-emerald-700/50 bg-emerald-950/10'
-    : score?.status === 'fail' ? 'border-red-700/50 bg-red-950/10'
-    : score?.status === 'warn' ? 'border-amber-700/40'
-    : 'border-slate-700/50 hover:border-slate-600/70';
-
-  return (
-    <div className={`border rounded-2xl p-7 transition-all bg-slate-900/40 ${borderColor}`}>
-      <div className="flex items-start justify-between gap-4 mb-5">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-3 flex-wrap mb-2">
-            <h3 className="font-bold text-white text-base leading-tight">{test.name}</h3>
-            {score && <Badge status={score.status} msg={score.msg} />}
-          </div>
-          <p className="text-sm text-slate-300 leading-relaxed">{test.description}</p>
-          {test.prereq && (
-            <div className="mt-3 flex items-center gap-2 text-amber-300 text-xs bg-amber-950/30 border border-amber-800/40 rounded-lg px-3 py-2">
-              <AlertCircle size={12} className="shrink-0" /> {test.prereq}
-            </div>
-          )}
-        </div>
-        <RunBtn onClick={onRun} running={running} />
-      </div>
-
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Command</span>
-        <CopyBtn text={test.cmd} />
-      </div>
-      <pre className="text-xs text-slate-300 font-mono bg-black/40 border border-slate-700/40 rounded-xl px-4 py-3 overflow-x-auto leading-relaxed">
-        {test.cmd.split('\n').slice(0, 3).join('\n')}{test.cmd.split('\n').length > 3 ? '\n…' : ''}
-      </pre>
-
-      {result?.output && <OutputPane output={result.output} status={score?.status} />}
-      {result?.timestamp && (
-        <p className="text-xs text-slate-500 mt-3 flex items-center gap-1.5">
-          <Clock size={11} /> Ran at {new Date(result.timestamp).toLocaleTimeString()}
-        </p>
-      )}
-    </div>
-  );
-};
-
-// ─── AB Side-by-Side Card ─────────────────────────────────────────────────────
-const ABCard = ({ test, result, running, onSetup, onSaveText, onRunCode, onSetVerdict, onScorePrecision }) => {
-  const [aText, setAText] = useState(result?.modeA?.text || '');
-  const [bText, setBText] = useState(result?.modeB?.text || '');
-
-  useEffect(() => { setAText(result?.modeA?.text || ''); }, [result?.modeA?.text]);
-  useEffect(() => { setBText(result?.modeB?.text || ''); }, [result?.modeB?.text]);
-
-  const autoScore = test.autoScore ? test.autoScore(aText, bText) : null;
-  const verdict = result?.verdict || autoScore;
-
-  const ModePanel = ({ mode, label, setupDone, codeOut, codeScore, text, setText }) => {
-    const modeColor = mode === 'modeA'
-      ? 'border-slate-700/50 bg-slate-900/20'
-      : 'border-blue-800/30 bg-blue-950/10';
-    const labelColor = mode === 'modeA' ? 'text-slate-400' : 'text-blue-400';
-
-    return (
-      <div className={`flex-1 min-w-0 border rounded-2xl p-5 ${modeColor}`}>
-        <div className="flex items-center justify-between mb-4">
-          <span className={`text-xs font-bold uppercase tracking-widest ${labelColor}`}>{label}</span>
-          <button
-            onClick={() => onSetup(test.id, mode, mode === 'modeA' ? test.setupA : test.setupB)}
-            disabled={running[`${test.id}-${mode}-setup`]}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg font-semibold border transition-all
-              ${setupDone
-                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-600/50'
-                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-600/50 hover:border-slate-500'}`}
-          >
-            {running[`${test.id}-${mode}-setup`]
-              ? <><RefreshCw size={11} className="animate-spin" /> Setting up…</>
-              : setupDone
-                ? <><Check size={11} /> Ready</>
-                : <><Settings size={11} /> Set Mode</>}
-          </button>
-        </div>
-
-        {/* Prompt */}
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs text-slate-400 font-semibold uppercase tracking-wide">Prompt</span>
-          <CopyBtn text={test.prompt} label="Copy prompt" />
-        </div>
-        <div className="bg-black/40 border border-slate-700/40 rounded-xl p-3 mb-4">
-          <p className="text-sm text-slate-300 leading-relaxed line-clamp-4">{test.prompt}</p>
-        </div>
-
-        {/* Paste area */}
-        <label className="text-xs text-slate-400 font-semibold uppercase tracking-wide mb-2 block">Claude's Response</label>
-        <textarea
-          value={text}
-          onChange={e => {
-            setText(e.target.value);
-            onSaveText(test.id, mode, e.target.value);
-          }}
-          placeholder="Paste Claude's response here after sending the prompt…"
-          className="w-full bg-black/40 border border-slate-700/50 rounded-xl p-3 text-sm text-slate-200 h-36 resize-y focus:outline-none focus:border-blue-500/70 focus:ring-1 focus:ring-blue-500/20 placeholder-slate-600 transition-all"
-        />
-
-        {/* For code tests: run button + output */}
-        {test.type === 'ab-code' && text && (
-          <div className="mt-4">
-            <button
-              onClick={() => onRunCode(test.id, mode, test.runCode(text, mode === 'modeA' ? 'a' : 'b'), test.scoreCode, test.timeout)}
-              disabled={running[`${test.id}-${mode}-code`]}
-              className="flex items-center gap-2 px-4 py-2 bg-purple-700 hover:bg-purple-600 text-white text-xs rounded-xl font-semibold border border-purple-600/50 transition-all"
-            >
-              {running[`${test.id}-${mode}-code`]
-                ? <><RefreshCw size={11} className="animate-spin" /> Running code…</>
-                : <><Terminal size={11} /> Run Code</>}
-            </button>
-            {codeOut && <OutputPane output={codeOut} status={codeScore?.status} />}
-            {codeScore && <div className="mt-3"><Badge status={codeScore.status} msg={codeScore.msg} /></div>}
-          </div>
-        )}
-
-        {/* For precision tests: score button */}
-        {test.type === 'ab-precision' && text && (
-          <div className="mt-4">
-            <button
-              onClick={() => onScorePrecision(test.id, mode, text, test.groundTruthCmd)}
-              disabled={running[`${test.id}-${mode}-score`]}
-              className="flex items-center gap-2 px-4 py-2 bg-purple-700 hover:bg-purple-600 text-white text-xs rounded-xl font-semibold border border-purple-600/50 transition-all"
-            >
-              {running[`${test.id}-${mode}-score`]
-                ? <><RefreshCw size={11} className="animate-spin" /> Scoring…</>
-                : <><BarChart3 size={11} /> Score precision/recall</>}
-            </button>
-            {result?.[mode]?.precision != null && (
-              <div className="mt-3 space-y-2 text-sm">
-                <div className="flex gap-6">
-                  <span className="text-slate-400">Precision: <span className="text-white font-mono font-bold">{(result[mode].precision * 100).toFixed(0)}%</span></span>
-                  <span className="text-slate-400">Recall: <span className="text-white font-mono font-bold">{(result[mode].recall * 100).toFixed(0)}%</span></span>
-                </div>
-                {result[mode].missing?.length > 0 && <p className="text-red-300 text-xs">Missing: {result[mode].missing.join(', ')}</p>}
-                {result[mode].extra?.length > 0 && <p className="text-amber-300 text-xs">Hallucinated: {result[mode].extra.join(', ')}</p>}
-                <Badge status={result[mode].precStatus} msg={result[mode].precStatus === 'pass' ? 'P≥80% R≥80%' : result[mode].precStatus === 'partial' ? 'R≥50%' : 'Low recall'} />
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Auto keyword highlight */}
-        {test.autoScore && text && mode === 'modeB' && (
-          <div className="mt-3">
-            {autoScore && <Badge status={autoScore} msg={autoScore.charAt(0).toUpperCase() + autoScore.slice(1)} />}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  return (
-    <div className="border border-slate-700/50 hover:border-slate-600/70 rounded-2xl p-7 transition-all bg-slate-900/40">
-      <div className="mb-5">
-        <div className="flex items-center gap-3 flex-wrap mb-2">
-          <h3 className="font-bold text-white text-base leading-tight">{test.name}</h3>
-          {verdict && <Badge status={verdict} msg={verdict.charAt(0).toUpperCase() + verdict.slice(1)} />}
-        </div>
-        <p className="text-sm text-slate-300 leading-relaxed">{test.description}</p>
-        {test.note && (
-          <div className="mt-3 flex items-center gap-2 text-amber-300 text-xs bg-amber-950/30 border border-amber-800/40 rounded-lg px-3 py-2">
-            <AlertCircle size={12} className="shrink-0" /> {test.note}
-          </div>
-        )}
-      </div>
-
-      {/* Side-by-side panels */}
-      <div className="flex gap-4 flex-col lg:flex-row">
-        <ModePanel
-          mode="modeA"
-          label="Mode A — Sieve OFF"
-          setupDone={result?.modeA?.setupDone}
-          text={aText}
-          setText={setAText}
-          codeOut={result?.modeA?.codeOut}
-          codeScore={result?.modeA?.codeScore}
-        />
-        <ModePanel
-          mode="modeB"
-          label="Mode B — Sieve ON"
-          setupDone={result?.modeB?.setupDone}
-          text={bText}
-          setText={setBText}
-          codeOut={result?.modeB?.codeOut}
-          codeScore={result?.modeB?.codeScore}
-        />
-      </div>
-
-      {/* Comparison footer */}
-      <div className="mt-5 pt-5 border-t border-slate-700/50 flex items-center justify-between flex-wrap gap-4">
-        <div className="text-sm text-slate-400 flex-1 min-w-0">
-          <span className="font-semibold text-slate-300">Expected: </span>{test.groundTruth}
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Verdict:</span>
-          {['better', 'same', 'worse'].map(v => (
-            <button
-              key={v}
-              onClick={() => onSetVerdict(test.id, v)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border
-                ${result?.verdict === v
-                  ? v === 'better' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-600/50'
-                    : v === 'same' ? 'bg-blue-500/20 text-blue-300 border-blue-600/50'
-                    : 'bg-red-500/20 text-red-300 border-red-600/50'
-                  : 'bg-slate-800 text-slate-400 border-slate-600/50 hover:bg-slate-700 hover:text-slate-200 hover:border-slate-500'}`}
-            >
-              {v === 'better' ? '↑ Better' : v === 'same' ? '= Same' : '↓ Worse'}
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// ─── Dashboard ────────────────────────────────────────────────────────────────
-const Dashboard = ({ tests, results }) => {
-  const counts = { pass: 0, fail: 0, warn: 0, notRun: 0 };
-  tests.forEach(t => {
-    const r = results[t.id];
-    if (!r) { counts.notRun++; return; }
-    const s = t.type === 'shell' ? r.score?.status
-      : t.type === 'ab' || t.type === 'ab-code' || t.type === 'ab-precision' ? (r.verdict || r.autoScore || 'notRun')
-      : 'notRun';
-    if (s === 'pass' || s === 'better') counts.pass++;
-    else if (s === 'fail' || s === 'worse') counts.fail++;
-    else if (s === 'warn' || s === 'same' || s === 'partial') counts.warn++;
-    else counts.notRun++;
-  });
-
-  const total = tests.length;
-  const done = counts.pass + counts.fail + counts.warn;
-  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-
-  return (
-    <div className="space-y-8">
-      <div>
-        <h2 className="text-2xl font-bold text-white mb-1">Dashboard</h2>
-        <p className="text-sm text-slate-400">{done} of {total} tests run ({pct}% complete)</p>
-      </div>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[
-          { label: 'Pass / Better', count: counts.pass,   color: 'text-emerald-300', bg: 'bg-emerald-500/10 border-emerald-700/50' },
-          { label: 'Fail / Worse',  count: counts.fail,   color: 'text-red-300',     bg: 'bg-red-500/10 border-red-700/50' },
-          { label: 'Warn / Same',   count: counts.warn,   color: 'text-amber-300',   bg: 'bg-amber-500/10 border-amber-700/50' },
-          { label: 'Not Run',       count: counts.notRun, color: 'text-slate-400',   bg: 'bg-slate-800/50 border-slate-700/50' },
-        ].map(c => (
-          <div key={c.label} className={`rounded-2xl border p-6 ${c.bg}`}>
-            <div className={`text-4xl font-bold mb-2 ${c.color}`}>{c.count}</div>
-            <div className="text-sm text-slate-400 font-medium">{c.label}</div>
-          </div>
-        ))}
-      </div>
-      <div className="rounded-2xl border border-slate-700/50 overflow-hidden">
-        <table className="w-full">
-          <thead className="bg-slate-800/60 text-xs font-semibold uppercase tracking-wider text-slate-400">
-            <tr>
-              <th className="px-5 py-3.5 text-left">Test</th>
-              <th className="px-5 py-3.5 text-left">Phase</th>
-              <th className="px-5 py-3.5 text-left">Status</th>
-              <th className="px-5 py-3.5 text-left hidden md:table-cell">Detail</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tests.map(t => {
-              const r = results[t.id];
-              const score = t.type === 'shell' ? r?.score
-                : r?.verdict ? { status: r.verdict, msg: `Manual: ${r.verdict}` }
-                : r?.autoScore ? { status: r.autoScore, msg: `Auto: ${r.autoScore}` }
-                : null;
-              return (
-                <tr key={t.id} className="border-t border-slate-800/50 hover:bg-slate-800/20 transition-colors">
-                  <td className="px-5 py-3 text-slate-200 text-sm font-medium">{t.name}</td>
-                  <td className="px-5 py-3 text-slate-400 text-xs">{PHASES.find(p => p.id === t.phase)?.label}</td>
-                  <td className="px-5 py-3">
-                    {score ? <Badge status={score.status} msg="" /> : <span className="text-slate-600 text-xs">not run</span>}
-                  </td>
-                  <td className="px-5 py-3 text-slate-400 text-xs hidden md:table-cell">{score?.msg || '—'}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-};
-
-// ─── Main App ─────────────────────────────────────────────────────────────────
+// ─── App ─────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [config, setConfig] = useState(() => {
-    try { return { ...DEFAULT_CONFIG, ...JSON.parse(localStorage.getItem('sieveConfig') || '{}') }; }
-    catch { return DEFAULT_CONFIG; }
-  });
-  const [results, setResults] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('sieveResults') || '{}'); }
-    catch { return {}; }
-  });
-  const [running, setRunning] = useState({});
-  const [activePhase, setActivePhase] = useState(-1);  // -1 = dashboard
-  const [showConfig, setShowConfig] = useState(false);
-  const [backendStatus, setBackendStatus] = useState('checking');
+  const [activePage, setActivePage] = useState('quickstart');
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [configDraft, setConfigDraft] = useState(config);
 
-  const tests = useMemo(() => buildTests(config), [config]);
-
-  // Persist
-  useEffect(() => { localStorage.setItem('sieveResults', JSON.stringify(results)); }, [results]);
-  useEffect(() => { localStorage.setItem('sieveConfig', JSON.stringify(config)); }, [config]);
-
-  // Backend ping
-  useEffect(() => {
-    const check = () => {
-      fetch(`${BACKEND}/health`, { signal: AbortSignal.timeout(2000) })
-        .then(() => setBackendStatus('online'))
-        .catch(() => setBackendStatus('offline'));
-    };
-    check();
-    const t = setInterval(check, 5000);
-    return () => clearInterval(t);
-  }, []);
-
-  const setRun = (key, val) => setRunning(p => ({ ...p, [key]: val }));
-
-  const updateResult = useCallback((id, update) =>
-    setResults(p => ({ ...p, [id]: { ...(p[id] || {}), ...update } })), []);
-
-  const updateMode = useCallback((id, mode, update) =>
-    setResults(p => ({
-      ...p,
-      [id]: { ...(p[id] || {}), [mode]: { ...((p[id] || {})[mode] || {}), ...update } }
-    })), []);
-
-  // Run a shell test
-  const onRun = useCallback(async (test) => {
-    if (backendStatus === 'offline') return;
-    const key = test.id;
-    setRun(key, true);
-    try {
-      const r = await callBackend(test.cmd, test.timeout || 60);
-      const score = test.score ? test.score(r.output, r.returncode) : null;
-      updateResult(test.id, { output: r.output, returncode: r.returncode, score, timestamp: Date.now() });
-    } catch (e) {
-      updateResult(test.id, {
-        output: `Backend error: ${e.message}\n\nMake sure server.py is running:\n  cd Sieve-testing && python3 server.py`,
-        returncode: -1,
-        score: { status: 'fail', msg: 'Backend offline' },
-        timestamp: Date.now(),
-      });
-    }
-    setRun(key, false);
-  }, [backendStatus, updateResult]);
-
-  // Setup A/B mode
-  const onSetup = useCallback(async (testId, mode, cmd) => {
-    const key = `${testId}-${mode}-setup`;
-    setRun(key, true);
-    try {
-      await callBackend(cmd, 15);
-      updateMode(testId, mode, { setupDone: true });
-    } catch {}
-    setRun(key, false);
-  }, [updateMode]);
-
-  // Save pasted text
-  const onSaveText = useCallback((testId, mode, text) => {
-    updateMode(testId, mode, { text });
-  }, [updateMode]);
-
-  // Run code (ab-code tests)
-  const onRunCode = useCallback(async (testId, mode, cmd, scoreCode, timeout) => {
-    const key = `${testId}-${mode}-code`;
-    setRun(key, true);
-    try {
-      const r = await callBackend(cmd, timeout || 30);
-      const score = scoreCode ? scoreCode(r.output, r.returncode) : null;
-      updateMode(testId, mode, { codeOut: r.output, codeScore: score });
-    } catch {}
-    setRun(key, false);
-  }, [updateMode]);
-
-  // Score precision/recall (ab-precision tests)
-  const onScorePrecision = useCallback(async (testId, mode, text, gtCmd) => {
-    const key = `${testId}-${mode}-score`;
-    setRun(key, true);
-    try {
-      const gtResult = await callBackend(gtCmd, 15);
-      const groundTruth = gtResult.output.trim().split('\n').map(l => l.replace(/^\.\//, '').trim()).filter(Boolean);
-      let answer = [];
-      try { answer = JSON.parse(text); } catch {}
-      const gtSet  = new Set(groundTruth);
-      const ansSet = new Set(answer);
-      const tp = [...ansSet].filter(x => gtSet.has(x)).length;
-      const precision = ansSet.size > 0 ? tp / ansSet.size : 0;
-      const recall    = gtSet.size  > 0 ? tp / gtSet.size  : 0;
-      const missing = [...gtSet].filter(x => !ansSet.has(x));
-      const extra   = [...ansSet].filter(x => !gtSet.has(x));
-      const precStatus = precision >= 0.8 && recall >= 0.8 ? 'pass' : recall >= 0.5 ? 'partial' : 'fail';
-      updateMode(testId, mode, { precision, recall, missing, extra, precStatus });
-    } catch {}
-    setRun(key, false);
-  }, [updateMode]);
-
-  // Manual verdict
-  const onSetVerdict = useCallback((testId, v) => {
-    updateResult(testId, { verdict: v });
-  }, [updateResult]);
-
-  const activeTests = activePhase === -1 ? [] : tests.filter(t => t.phase === activePhase);
-  const phaseProgress = (phase) => {
-    const pts = tests.filter(t => t.phase === phase);
-    if (!pts.length) return 0;
-    const done = pts.filter(t => {
-      const r = results[t.id];
-      if (!r) return false;
-      if (t.type === 'shell') return r.score != null;
-      return r.modeA?.text || r.modeB?.text || r.verdict;
-    }).length;
-    return Math.round((done / pts.length) * 100);
-  };
+  const PageComponent = PAGE_COMPONENTS[activePage] || QuickStartPage;
 
   return (
     <div className="min-h-screen bg-[#090b10] text-slate-200 flex font-sans">
       {/* Mobile header */}
       <div className="md:hidden fixed top-0 left-0 right-0 z-20 flex items-center justify-between p-4 bg-[#0d1117] border-b border-slate-800">
-        <span className="font-bold flex items-center gap-2"><Activity size={18} className="text-blue-500" /> Sieve Tests</span>
-        <button onClick={() => setMobileOpen(v => !v)} className="p-1.5 rounded hover:bg-slate-800">
+        <span className="font-bold flex items-center gap-2 text-sm">
+          <BookOpen size={16} className="text-blue-400" /> Sieve Testing Guide
+        </span>
+        <button onClick={() => setMobileOpen(v => !v)} className="p-1.5 rounded hover:bg-slate-800 text-slate-400">
           {mobileOpen ? <X size={18} /> : <Menu size={18} />}
         </button>
       </div>
@@ -975,163 +922,85 @@ export default function App() {
         ${mobileOpen ? 'fixed inset-0 top-14 z-10 bg-[#090b10]' : 'hidden'}
         md:flex md:flex-col md:w-72 md:shrink-0 bg-[#0d1117] border-r border-slate-800 md:h-screen md:sticky md:top-0
       `}>
-        {/* Logo */}
-        <div className="p-5 hidden md:flex items-center justify-between">
-          <span className="font-bold text-lg bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400 flex items-center gap-2">
-            <Activity size={20} className="text-blue-500" /> Sieve Tests
-          </span>
-          <button onClick={() => { setConfigDraft(config); setShowConfig(true); }} className="p-1.5 rounded hover:bg-slate-800 text-slate-400">
-            <Settings size={15} />
-          </button>
+        <div className="p-5 hidden md:flex items-center gap-2.5">
+          <BookOpen size={18} className="text-blue-400 shrink-0" />
+          <span className="font-bold text-base text-white">Sieve Testing Guide</span>
         </div>
 
-        {/* Backend status */}
-        <div className={`mx-4 mb-4 px-3 py-2.5 rounded-xl flex items-center gap-2 text-xs font-semibold border
-          ${backendStatus === 'online' ? 'bg-emerald-500/10 text-emerald-300 border-emerald-700/50' : backendStatus === 'checking' ? 'bg-slate-800/50 text-slate-400 border-slate-700/50' : 'bg-red-500/10 text-red-300 border-red-700/50'}`}>
-          {backendStatus === 'online' ? <Wifi size={13} /> : <WifiOff size={13} />}
-          {backendStatus === 'online' ? 'Backend online' : backendStatus === 'checking' ? 'Checking backend…' : 'Backend offline — run server.py'}
-        </div>
-
-        {/* Nav */}
-        <nav className="flex-1 overflow-y-auto px-3 space-y-1">
-          <button
-            onClick={() => { setActivePhase(-1); setMobileOpen(false); }}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all
-              ${activePhase === -1 ? 'bg-blue-500/15 text-blue-300 border border-blue-700/40' : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'}`}
-          >
-            <BarChart3 size={16} /> Dashboard
-          </button>
-          {PHASES.map(ph => {
-            const Icon = ph.icon;
-            const prog = phaseProgress(ph.id);
+        <nav className="flex-1 overflow-y-auto px-3 pb-6 space-y-0.5">
+          {/* Group dividers */}
+          <p className="px-3 pt-2 pb-1 text-xs font-semibold uppercase tracking-wider text-slate-600">Getting started</p>
+          {PAGES.slice(0, 3).map(pg => {
+            const Icon = pg.icon;
             return (
-              <button
-                key={ph.id}
-                onClick={() => { setActivePhase(ph.id); setMobileOpen(false); }}
-                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all
-                  ${activePhase === ph.id ? 'bg-blue-500/15 text-blue-300 border border-blue-700/40' : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'}`}
-              >
-                <div className="flex items-center gap-3">
-                  <Icon size={15} />
-                  <span>Phase {ph.id} · {ph.label}</span>
-                </div>
-                {prog > 0 && (
-                  prog === 100
-                    ? <CheckCircle2 size={15} className="text-emerald-400" />
-                    : <span className="text-xs font-bold bg-blue-500/15 text-blue-400 px-2 py-0.5 rounded-full">{prog}%</span>
-                )}
+              <button key={pg.id} onClick={() => { setActivePage(pg.id); setMobileOpen(false); }}
+                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-all
+                  ${activePage === pg.id ? 'bg-blue-500/15 text-blue-300 border border-blue-700/40' : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'}`}>
+                <Icon size={15} className="shrink-0" />
+                <span>{pg.label}</span>
+              </button>
+            );
+          })}
+
+          <p className="px-3 pt-4 pb-1 text-xs font-semibold uppercase tracking-wider text-slate-600">Test cases</p>
+          {PAGES.slice(3, 13).map(pg => {
+            const Icon = pg.icon;
+            return (
+              <button key={pg.id} onClick={() => { setActivePage(pg.id); setMobileOpen(false); }}
+                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-all
+                  ${activePage === pg.id ? 'bg-blue-500/15 text-blue-300 border border-blue-700/40' : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'}`}>
+                <Icon size={15} className="shrink-0" />
+                <span>{pg.label}</span>
+              </button>
+            );
+          })}
+
+          <p className="px-3 pt-4 pb-1 text-xs font-semibold uppercase tracking-wider text-slate-600">Quality</p>
+          {PAGES.slice(13).map(pg => {
+            const Icon = pg.icon;
+            return (
+              <button key={pg.id} onClick={() => { setActivePage(pg.id); setMobileOpen(false); }}
+                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-all
+                  ${activePage === pg.id ? 'bg-blue-500/15 text-blue-300 border border-blue-700/40' : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'}`}>
+                <Icon size={15} className="shrink-0" />
+                <span>{pg.label}</span>
               </button>
             );
           })}
         </nav>
-
-        {/* Reset */}
-        <div className="p-4 border-t border-slate-800">
-          <button
-            onClick={() => { if (confirm('Reset all test results?')) setResults({}); }}
-            className="w-full flex items-center justify-center gap-2 py-2.5 bg-slate-800/80 hover:bg-red-900/40 text-slate-400 hover:text-red-300 border border-slate-700/50 hover:border-red-800/50 rounded-xl text-xs font-medium transition-all"
-          >
-            <Trash2 size={12} /> Reset all results
-          </button>
-        </div>
       </aside>
 
-      {/* Main */}
+      {/* Main content */}
       <main className="flex-1 overflow-y-auto h-screen pt-14 md:pt-0">
-        <div className="max-w-5xl mx-auto p-5 md:p-8 pb-24 space-y-6">
-          {activePhase === -1 ? (
-            <Dashboard tests={tests} results={results} />
-          ) : (
-            <>
-              <div className="flex items-center gap-3 pb-2 border-b border-slate-800">
-                {(() => { const Icon = PHASES.find(p => p.id === activePhase)?.icon || Play; return <Icon size={20} className="text-blue-400" />; })()}
-                <h2 className="text-xl font-bold text-white">
-                  Phase {activePhase} · {PHASES.find(p => p.id === activePhase)?.label}
-                </h2>
-              </div>
-              {activeTests.map(test => {
-                const r = results[test.id] || {};
-                if (test.type === 'shell') {
-                  return (
-                    <ShellCard
-                      key={test.id}
-                      test={test}
-                      result={r}
-                      running={running[test.id]}
-                      onRun={() => onRun(test)}
-                    />
-                  );
-                }
-                return (
-                  <ABCard
-                    key={test.id}
-                    test={test}
-                    result={r}
-                    running={running}
-                    onSetup={onSetup}
-                    onSaveText={onSaveText}
-                    onRunCode={onRunCode}
-                    onSetVerdict={onSetVerdict}
-                    onScorePrecision={onScorePrecision}
-                  />
-                );
-              })}
-              <div className="flex justify-between pt-4">
-                <button onClick={() => setActivePhase(p => Math.max(-1, p - 1))}
-                  className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-200 transition-colors">
-                  <ChevronLeft size={16} /> Prev
-                </button>
-                <button onClick={() => setActivePhase(p => Math.min(PHASES.length - 1, p + 1))}
-                  disabled={activePhase === PHASES.length - 1}
-                  className="flex items-center gap-1.5 text-sm text-blue-400 hover:text-blue-300 disabled:opacity-30 transition-colors">
-                  Next <ChevronRight size={16} />
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      </main>
+        <div className="max-w-3xl mx-auto p-5 md:p-10 pb-24">
+          <PageComponent />
 
-      {/* Config Modal */}
-      {showConfig && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="bg-[#11151d] border border-slate-700 rounded-2xl w-full max-w-lg p-6 shadow-2xl">
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="font-bold text-lg">Configure Paths</h2>
-              <button onClick={() => setShowConfig(false)} className="text-slate-400 hover:text-white"><X size={18} /></button>
-            </div>
-            <p className="text-xs text-slate-400 mb-4">Git Bash paths (<code>/c/…</code>). Pre-filled for <code>C:\Users\avrha\Documents\projects\Sieve-testing</code>. Open Git Bash (Start → Git Bash) to run the backend server.</p>
-            <div className="space-y-3">
-              {[
-                { key: 'sieve',    label: 'Sieve repo' },
-                { key: 'requests', label: 'psf/requests' },
-                { key: 'click',    label: 'pallets/click' },
-                { key: 'httpx',    label: 'encode/httpx' },
-              ].map(({ key, label }) => (
-                <div key={key}>
-                  <label className="text-xs text-slate-400 mb-1 block">{label}</label>
-                  <input
-                    value={configDraft[key]}
-                    onChange={e => setConfigDraft(p => ({ ...p, [key]: e.target.value }))}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-300 focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-              ))}
-            </div>
-            <div className="flex gap-3 mt-5">
-              <button
-                onClick={() => { setConfig(configDraft); setShowConfig(false); setResults({}); }}
-                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors"
-              >
-                Save & reset results
-              </button>
-              <button onClick={() => setShowConfig(false)} className="px-4 py-2.5 bg-slate-800 text-slate-300 text-sm rounded-lg hover:bg-slate-700 transition-colors">
-                Cancel
-              </button>
-            </div>
+          {/* Prev / Next navigation */}
+          <div className="flex justify-between items-center mt-10 pt-6 border-t border-slate-800">
+            {(() => {
+              const idx = PAGES.findIndex(p => p.id === activePage);
+              const prev = PAGES[idx - 1];
+              const next = PAGES[idx + 1];
+              return (
+                <>
+                  {prev
+                    ? <button onClick={() => setActivePage(prev.id)}
+                        className="flex items-center gap-2 text-sm text-slate-400 hover:text-slate-200 transition-colors">
+                        ← {prev.label}
+                      </button>
+                    : <div />}
+                  {next
+                    ? <button onClick={() => setActivePage(next.id)}
+                        className="flex items-center gap-2 text-sm text-blue-400 hover:text-blue-300 transition-colors">
+                        {next.label} →
+                      </button>
+                    : <div />}
+                </>
+              );
+            })()}
           </div>
         </div>
-      )}
+      </main>
     </div>
   );
 }
