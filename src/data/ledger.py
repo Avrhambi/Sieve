@@ -158,14 +158,14 @@ class Ledger:
                 skeleton = excluded.skeleton,
                 summary  = excluded.summary
             """,
-            (file_id, skeleton, summary),
+            (self._norm(file_id), skeleton, summary),
         )
         self._conn.commit()
 
     def get_cache(self, file_id: str) -> Optional[sqlite3.Row]:
         """Return the context_cache row for *file_id*, or None."""
         return self._conn.execute(
-            "SELECT * FROM context_cache WHERE file_id = ?", (file_id,)
+            "SELECT * FROM context_cache WHERE file_id = ?", (self._norm(file_id),)
         ).fetchone()
 
     # ------------------------------------------------------------------
