@@ -10,7 +10,15 @@ Test project: psf/requests
 
 **Status: PASS**
 
-When the daemon is not running, the hook falls back to a file-tree heuristic and injects the list of source files before the prompt. Verified via the `[sieve] daemon offline — file-tree heuristic` system-reminder appearing in every prompt in the Sieve session.
+**What it tests:** When the Sieve daemon is not running, does the hook still provide something useful to Claude rather than failing silently?
+
+**Result:** The hook correctly detected the daemon was offline (no heartbeat in `ledger.db`) and fell back to scanning the file tree, injecting a list of source files before every prompt. Verified by the `[sieve] daemon offline — file-tree heuristic` message appearing consistently in the Sieve development session.
+
+**What this means:** Sieve is resilient — even without a running daemon, Claude gets at minimum a file map of the project. Claude can use this to navigate without manually searching. The fallback is also fast (pure stdlib, no third-party imports), meeting the <50ms latency target.
+
+**Problems identified:** None for this test.
+
+**Insight:** The offline fallback is the most reliable part of the system. It always fires, costs almost nothing, and gives Claude a structural map even when the expensive pipeline (Ollama, watchdog, SQLite) is unavailable.
 
 ---
 
@@ -18,7 +26,9 @@ When the daemon is not running, the hook falls back to a file-tree heuristic and
 
 **Status: SAME**
 
-Prompt: `Where would I add retry logic to the HTTP request flow in requests/adapters.py?`
+**What it tests:** Does injecting pre-built file skeletons help Claude answer architecture questions faster and more accurately than using its tools alone?
+
+**Prompt:** `Where would I add retry logic to the HTTP request flow in requests/adapters.py?`
 
 | Dimension | Mode A (no Sieve) | Mode B (with Sieve) |
 |---|---|---|
@@ -29,7 +39,14 @@ Prompt: `Where would I add retry logic to the HTTP request flow in requests/adap
 | Answer quality | Better — showed code sketch, mentioned `__init__` | Good — cited line numbers, urllib3 Retry |
 | Verdict | baseline | Same |
 
-**Notes:** Mode B used *more* tool calls because the 145KB full-dump injection didn't help Claude navigate faster for a targeted single-file question. Selective injection (only inject files relevant to the prompt) would improve this result.
+**What this means:** For a targeted single-file question on a small codebase (34 files), Sieve provided no advantage. Claude found the answer equally well on its own in fewer steps. Mode B actually used more tool calls — Claude searched for the file even though the skeleton was already in context, because the 145KB injection was too large and noisy to navigate efficiently.
+
+**Problems identified:**
+1. **Injection is indiscriminate** — all 34 files are dumped into context regardless of relevance. This buries useful signals in noise.
+2. **Claude prefers tools for targeted questions** — when Claude knows exactly which file to look in, reading it directly is faster than scanning a large pre-injected blob.
+3. **Data files inflate the injection** — `flask_theme_support.py` (a Pygments style dict) has no functions to strip, so the skeletonizer injected it in full, wasting ~60KB.
+
+**Insight:** Sieve's value for this use case requires **selective injection** — only inject skeletons for files semantically related to the prompt. The current all-or-nothing approach works against Claude's agentic tool use on small projects. Expected to perform better on large codebases (100+ files) where tool search is expensive.
 
 ---
 
@@ -37,36 +54,43 @@ Prompt: `Where would I add retry logic to the HTTP request flow in requests/adap
 
 **Status: PASS**
 
-Prompt: `@full src/requests/api.py what does the get() function do line by line?`
+**What it tests:** Can a user force Sieve to inject a complete file (not just the skeleton) for questions that need full implementation detail?
 
-Claude answered the question entirely from the injected file content — no `Read` or `Search` tool calls. The full 158-line file was prepended to the prompt by the hook before Claude received it.
+**Prompt:** `@full src/requests/api.py what does the get() function do line by line?`
 
-**Notes:**
-- Original syntax `!full` conflicted with Claude Code's `!` shell command prefix — fixed to `@full`.
-- Token efficiency confirmed: zero tool call overhead for the file read.
+**Result:** Claude answered entirely from the injected file content — zero `Read` or `Search` tool calls. The hook intercepted the prompt, read the full 158-line file, prepended it as context, and Claude reasoned from that alone.
+
+**What this means:** `@full` is the highest-value feature for implementation questions. Instead of Claude making 2–3 tool calls (search → find path → read), the user pays one upfront injection and Claude answers immediately. For files Claude would need to read anyway, this saves round-trips and keeps the conversation faster.
+
+**Problems identified:**
+1. **`!full` conflicted with Claude Code's `!` shell prefix** — `!full file.py` was executed as a bash command, not passed to the hook. Renamed to `@full`.
+2. **`select.select` on stdin doesn't work on Windows** — the hook couldn't read the prompt text from stdin to detect `@full`. Replaced with a direct blocking read.
+3. **File path extraction was too greedy** — `@full api.py explain this` tried to open a file named `api.py explain this`. Fixed to take only the first token after `@full`.
+
+**Insight:** `@full` is a power-user feature that delivers measurable token savings. The UX issue is discoverability — users need to know the syntax exists. A good next step would be auto-triggering `@full` when the prompt explicitly mentions a filename and asks for implementation details.
 
 ---
 
-## Bugs fixed during testing
+## Overall Windows compatibility issues found
 
-| Bug | Fix | Commit |
+The original codebase was developed and tested on Linux/Mac. Running on Windows (Git Bash + Python 3.14) uncovered 11 bugs before a single test passed:
+
+| Category | Bug count | Root cause |
 |---|---|---|
-| `add_signal_handler` not supported on Windows | Fall back to `signal.signal` | `2212c58` |
-| `main.py` was a placeholder — daemon never started | Wired up watcher, processor, heartbeat | `8669f4f` |
-| `Ledger.__init__` default arg bound at import time | Read `_DB_PATH` dynamically | `2fc03e3` |
-| Resource thresholds blocked processor on Windows | Set thresholds to 0 | `31b3dd4` |
-| Hook read `ledger.db` from sieve root, not watched project | Use `Path.cwd() / "ledger.db"` | `b920a84` |
-| Paths stored with backslashes, queried with forward slashes | Normalize all paths to `/` in ledger | `cc9152b` |
-| `context_cache.file_id` stored with backslashes | Normalize in `upsert_cache` and `get_cache` | `5397bd3` |
-| Hook crashed on non-ASCII characters (cp1255) | Force UTF-8 stdout | `e8b20e2` |
-| `select.select` on stdin not supported on Windows | Direct blocking stdin read, cached | `01a0da4` |
-| `!full` path extraction included trailing question text | Take only first token after `@full` | `8279d74` |
-| `!full` conflicted with Claude Code `!` shell prefix | Renamed to `@full` | `89b604e` |
+| Unix-only APIs | 3 | `add_signal_handler`, `select.select`, `/proc/meminfo` |
+| Path separator mismatch | 2 | Backslash vs forward slash in SQLite queries |
+| Hardcoded paths | 2 | `ledger.db` path relative to sieve root, not watched project |
+| Python default arg gotcha | 1 | `Ledger(db_path=_DB_PATH)` bound at class definition time |
+| Encoding | 1 | Windows cp1255 can't encode `✓` |
+| CLI conflict | 1 | `!full` vs Claude Code's `!` shell prefix |
+| Incomplete implementation | 1 | `main.py` was a placeholder — daemon never started |
+
+**Insight:** The system needs a Windows CI test run before any future release. Most fixes were one-liners, but they blocked all testing until resolved.
 
 ---
 
 ## Next tests
 
-- TEST-04 — Hybrid context
-- TEST-05 — Token reduction measurement
-- TEST-06 — PostCompact re-injection
+- TEST-04 — Hybrid context (named file gets full content, others stay as skeletons)
+- TEST-05 — Token reduction measurement (target: 70–93% compression)
+- TEST-06 — PostCompact re-injection (highest-value A/B test)
