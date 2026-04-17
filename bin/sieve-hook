@@ -52,26 +52,37 @@ _args, _ = _ap.parse_known_args()
 # ---------------------------------------------------------------------------
 # !full [path] bypass — inject file contents and exit 0
 # ---------------------------------------------------------------------------
+_stdin_prompt_cache: str | None = None
+
+def _read_stdin_prompt() -> str:
+    """Read prompt text from stdin — works on Windows (no select needed). Cached."""
+    global _stdin_prompt_cache
+    if _stdin_prompt_cache is not None:
+        return _stdin_prompt_cache
+    if sys.stdin.isatty():
+        _stdin_prompt_cache = ""
+        return ""
+    try:
+        import json as _j
+        data = sys.stdin.buffer.read()
+        try:
+            _stdin_prompt_cache = _j.loads(data).get("prompt", "")
+        except Exception:
+            _stdin_prompt_cache = data.decode("utf-8", errors="replace")
+    except Exception:
+        _stdin_prompt_cache = ""
+    return _stdin_prompt_cache
+
+
 def _check_full_bypass() -> None:
     prompt = None
     env_prompt = os.environ.get("SIEVE_PROMPT", "")
     if env_prompt.startswith("!full "):
         prompt = env_prompt
     elif not sys.stdin.isatty():
-        try:
-            import select as _sel
-            ready, _, _ = _sel.select([sys.stdin], [], [], 0.005)
-            if ready:
-                data = sys.stdin.buffer.read()
-                try:
-                    import json as _j
-                    candidate = _j.loads(data).get("prompt", "")
-                except Exception:
-                    candidate = data.decode("utf-8", errors="replace")
-                if str(candidate).lstrip().startswith("!full "):
-                    prompt = str(candidate).lstrip()
-        except Exception:
-            pass
+        candidate = _read_stdin_prompt()
+        if candidate.lstrip().startswith("!full "):
+            prompt = candidate.lstrip()
     if prompt is not None and prompt.startswith("!full "):
         file_path = prompt[len("!full "):].strip()
         try:
@@ -318,23 +329,11 @@ def _process_images() -> str:
 # Main
 # ---------------------------------------------------------------------------
 def _read_prompt_text() -> str:
-    """Read the prompt text from SIEVE_PROMPT env var or stdin (non-blocking)."""
+    """Read the prompt text from SIEVE_PROMPT env var or stdin."""
     env_prompt = os.environ.get("SIEVE_PROMPT", "")
     if env_prompt:
         return env_prompt
-    if not sys.stdin.isatty():
-        try:
-            import select as _sel
-            import json as _j
-            ready, _, _ = _sel.select([sys.stdin], [], [], 0.005)
-            if ready:
-                data = sys.stdin.buffer.read()
-                try:
-                    return _j.loads(data).get("prompt", "")
-                except Exception:
-                    return data.decode("utf-8", errors="replace")
-        except Exception:
-            pass
+    return _read_stdin_prompt()
     return ""
 
 
