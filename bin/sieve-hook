@@ -11,6 +11,14 @@ _t0 = _t.perf_counter()
 
 import os
 import sys
+import io
+
+# Force UTF-8 stdout/stderr so non-ASCII characters (e.g. ✓) don't crash on
+# Windows terminals with non-Unicode code pages (cp1255, cp1252, etc.).
+if hasattr(sys.stdout, 'buffer'):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'buffer'):
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 import sqlite3
 import argparse
 from pathlib import Path
