@@ -82,7 +82,9 @@ class Ledger:
         (none — storage path and lock timeout are fixed constants)
     """
 
-    def __init__(self, db_path: Path = _DB_PATH) -> None:
+    def __init__(self, db_path: Path = None) -> None:
+        if db_path is None:
+            db_path = _DB_PATH
         self._db_path = db_path
         self._conn = _connect(db_path)
         _init_schema(self._conn)
