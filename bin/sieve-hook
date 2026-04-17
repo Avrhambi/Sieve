@@ -50,7 +50,7 @@ _ap.add_argument("--mode", default="prompt", choices=["prompt", "compact"])
 _args, _ = _ap.parse_known_args()
 
 # ---------------------------------------------------------------------------
-# !full [path] bypass — inject file contents and exit 0
+# @full[path] bypass — inject file contents and exit 0
 # ---------------------------------------------------------------------------
 _stdin_prompt_cache: str | None = None
 
@@ -77,22 +77,22 @@ def _read_stdin_prompt() -> str:
 def _check_full_bypass() -> None:
     prompt = None
     env_prompt = os.environ.get("SIEVE_PROMPT", "")
-    if env_prompt.startswith("!full "):
+    if env_prompt.startswith("@full"):
         prompt = env_prompt
     elif not sys.stdin.isatty():
         candidate = _read_stdin_prompt()
-        if candidate.lstrip().startswith("!full "):
+        if candidate.lstrip().startswith("@full"):
             prompt = candidate.lstrip()
-    if prompt is not None and prompt.startswith("!full "):
-        # Take only the first token after !full — ignore any trailing question text.
-        file_path = prompt[len("!full "):].split()[0] if prompt[len("!full "):].strip() else ""
+    if prompt is not None and prompt.startswith("@full"):
+        # Take only the first token after @full— ignore any trailing question text.
+        file_path = prompt[len("@full"):].split()[0] if prompt[len("@full"):].strip() else ""
         try:
             with open(file_path, "r", errors="replace") as fh:
                 contents = fh.read()
             print(f"### {file_path}")
             print(contents)
         except OSError as e:
-            print(f"[sieve] !full: could not read {file_path!r}: {e}", file=sys.stderr)
+            print(f"[sieve] @full: could not read {file_path!r}: {e}", file=sys.stderr)
         exit(0)
 
 
