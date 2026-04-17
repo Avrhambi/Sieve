@@ -30,7 +30,7 @@ def _is_wsl2() -> bool:
 _STALE_THRESHOLD = 30.0          # seconds — matches STALE_THRESHOLD in heartbeat.py
 _HEARTBEAT_TIMEOUT = 0.3         # sqlite timeout for heartbeat read (seconds)
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-_DB_PATH = _REPO_ROOT / "ledger.db"
+_DB_PATH = Path.cwd().resolve() / "ledger.db"
 _SOURCE_EXTS = frozenset({".py", ".js", ".ts", ".tsx", ".jsx"})
 _IMG_EXTS = frozenset({".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif"})
 
@@ -206,7 +206,8 @@ def _get_skeletons(focal: set = None) -> str:
     if str(_REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(_REPO_ROOT))
 
-    from src.data.ledger import Ledger, LedgerError  # noqa: PLC0415
+    from src.data.ledger import Ledger, LedgerError, set_db_path  # noqa: PLC0415
+    set_db_path(_DB_PATH)
 
     cwd = str(Path.cwd())
     sections: list[str] = []
@@ -253,7 +254,8 @@ def _compact_skeleton() -> str:
     if str(_REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(_REPO_ROOT))
 
-    from src.data.ledger import Ledger, LedgerError  # noqa: PLC0415
+    from src.data.ledger import Ledger, LedgerError, set_db_path  # noqa: PLC0415
+    set_db_path(_DB_PATH)
 
     cwd = str(Path.cwd())
     sections: list[str] = ["[sieve] architectural skeleton re-injection (post-compact)", ""]
