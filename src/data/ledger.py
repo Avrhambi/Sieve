@@ -102,6 +102,11 @@ class Ledger:
     # ledger table
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _norm(path: str) -> str:
+        """Normalize path separators to forward slashes for cross-platform consistency."""
+        return path.replace("\\", "/")
+
     def upsert_file(
         self,
         path: str,
@@ -119,14 +124,14 @@ class Ledger:
                 ast_hash   = excluded.ast_hash,
                 is_ignored = excluded.is_ignored
             """,
-            (path, mtime, ast_hash, int(is_ignored)),
+            (self._norm(path), mtime, ast_hash, int(is_ignored)),
         )
         self._conn.commit()
 
     def get_file(self, path: str) -> Optional[sqlite3.Row]:
         """Return the ledger row for *path*, or None if not present."""
         return self._conn.execute(
-            "SELECT * FROM ledger WHERE path = ?", (path,)
+            "SELECT * FROM ledger WHERE path = ?", (self._norm(path),)
         ).fetchone()
 
     def delete_file(self, path: str) -> None:
@@ -215,7 +220,7 @@ class Ledger:
 
     def get_files_under(self, path_prefix: str) -> list[sqlite3.Row]:
         """Return all non-ignored ledger rows whose path starts with path_prefix."""
-        prefix = path_prefix.rstrip("/") + "/"
+        prefix = self._norm(path_prefix).rstrip("/") + "/"
         return self._conn.execute(
             "SELECT path FROM ledger WHERE path LIKE ? AND is_ignored = 0 ORDER BY path",
             (prefix + "%",),
