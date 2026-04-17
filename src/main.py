@@ -1,8 +1,8 @@
 """Sieve daemon entry point."""
 import asyncio
 import logging
-import os
 import signal
+import sys
 from pathlib import Path
 
 import toml
@@ -32,8 +32,7 @@ def load_config(path: Path = CONFIG_PATH) -> SieveConfig:
     return SieveConfig(**raw)
 
 
-async def start() -> None:
-    """Placeholder coroutine — daemon logic implemented in TASK-06."""
+async def start(root: Path) -> None:
     global _shutdown_event
     _shutdown_event = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -49,11 +48,41 @@ async def start() -> None:
         for sig in (signal.SIGTERM, signal.SIGINT):
             signal.signal(sig, _set_shutdown)
 
-    config = load_config()
-    logger.info("Sieve daemon starting")
-    await asyncio.sleep(0)
+    # Point the ledger at the watched project directory.
+    from src.data.ledger import set_db_path
+    db_path = root / "ledger.db"
+    set_db_path(db_path)
+
+    # Also point heartbeat at the same DB.
+    import src.daemon.heartbeat as _heartbeat_mod
+    _heartbeat_mod._DB_PATH = db_path
+
+    load_config()
+    logger.info("Sieve daemon starting — watching %s", root)
+
+    from src.daemon.watcher import start_watcher
+    from src.daemon.processor import start_processor
+    from src.daemon.heartbeat import start_heartbeat
+
+    tasks = [
+        asyncio.create_task(start_watcher(root)),
+        asyncio.create_task(start_processor(root)),
+        asyncio.create_task(start_heartbeat(db_path)),
+    ]
+
+    await _shutdown_event.wait()
+
+    logger.info("Shutdown signal received — stopping daemon")
+    for t in tasks:
+        t.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+    logger.info("Daemon stopped")
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(start())
+    if len(sys.argv) < 2:
+        print("Usage: python src/main.py <path-to-watch>")
+        sys.exit(1)
+    root_path = Path(sys.argv[1]).resolve()
+    asyncio.run(start(root_path))
