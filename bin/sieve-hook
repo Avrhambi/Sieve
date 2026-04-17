@@ -84,7 +84,8 @@ def _check_full_bypass() -> None:
         if candidate.lstrip().startswith("!full "):
             prompt = candidate.lstrip()
     if prompt is not None and prompt.startswith("!full "):
-        file_path = prompt[len("!full "):].strip()
+        # Take only the first token after !full — ignore any trailing question text.
+        file_path = prompt[len("!full "):].split()[0] if prompt[len("!full "):].strip() else ""
         try:
             with open(file_path, "r", errors="replace") as fh:
                 contents = fh.read()
