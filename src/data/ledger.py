@@ -10,6 +10,12 @@ _DB_PATH = Path(__file__).parent.parent.parent / "ledger.db"
 _LOCK_TIMEOUT_MS = 500
 
 
+def set_db_path(path: Path) -> None:
+    """Override the default ledger.db location (called by main before startup)."""
+    global _DB_PATH
+    _DB_PATH = path
+
+
 def _get_db_path() -> Path:
     return _DB_PATH
 
