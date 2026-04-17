@@ -37,8 +37,17 @@ async def start() -> None:
     global _shutdown_event
     _shutdown_event = asyncio.Event()
     loop = asyncio.get_running_loop()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, _shutdown_event.set)
+
+    def _set_shutdown(*_):
+        loop.call_soon_threadsafe(_shutdown_event.set)
+
+    try:
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, _shutdown_event.set)
+    except NotImplementedError:
+        # Windows: add_signal_handler is not supported
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            signal.signal(sig, _set_shutdown)
 
     config = load_config()
     logger.info("Sieve daemon starting")
