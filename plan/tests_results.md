@@ -89,8 +89,53 @@ The original codebase was developed and tested on Linux/Mac. Running on Windows 
 
 ---
 
+## TEST-04 — Hybrid context
+
+**Status: PARTIAL PASS (mechanism works, delivery blocked)**
+
+**What it tests:** When a file is named in the prompt, does Sieve inject it in full while keeping other files as skeletons?
+
+**Result:** The hybrid context mechanism fires correctly — manual test confirmed `[sieve] hybrid context: 1 file(s) full, 44 skeleton(s)`. Focal file detection was fixed to handle src-layout repos (e.g. `requests/adapters.py` resolving to `src/requests/adapters.py`). However, Claude still made `Read` tool calls in the Claude Code session.
+
+**Root cause discovered — critical finding:**
+
+Claude Code's harness caps inline hook injection at approximately **2KB**. The hook outputs **149KB** (44 files). The harness saves the excess to a temp file and only gives Claude a 2KB preview — which happens to be README/markdown content, not Python skeletons. Claude never sees the Python source skeletons and falls back to tool reads.
+
+Claude confirmed this directly:
+> *"The output was 149KB, which the harness flagged as too large to include inline — I only received a 2KB preview showing markdown files, not the Python source. So the actual adapters.py content wasn't visible to me from the hook, and I fell back to using the Read tool directly."*
+
+**What this means:** The whole-codebase dump approach is fundamentally incompatible with Claude Code's injection limit. This is the root cause of TEST-02 and TEST-04 failures, and explains why Claude used tools even with Sieve ON.
+
+**Exception — TEST-03 worked** because `@full` exits immediately after printing one file (~5KB), which fits within the inline limit.
+
+**Problems identified:**
+1. **Injection size (149KB) far exceeds Claude Code's ~2KB inline limit** — the core design assumption is broken
+2. **Docs/markdown files inflating output** — `flask_theme_support.py`, README, conf.py injected unnecessarily
+3. **Focal file detection failed for src-layout repos** — fixed in commit `9306856`
+
+**Insight — architectural pivot required:**
+
+The current approach (inject everything, let Claude pick what's relevant) is the opposite of what works. The injection must be:
+- **Small** (<2KB to fit inline) — roughly 3–5 skeletons max
+- **Selective** — only files semantically related to the prompt
+- **Ranked** — most relevant file first
+
+This requires a keyword/symbol match between the prompt and the ledger's `symbol_index` table, which already exists in the schema. The data is there; the hook just needs to query it intelligently instead of dumping everything.
+
+---
+
+## Critical blocker: injection size limit
+
+**All A/B tests (TEST-02, TEST-04) are invalid until this is fixed.** The baseline and Sieve-ON conditions were effectively identical — Claude received the same 2KB markdown preview in both cases and used tools in both cases.
+
+**Recommended fix before continuing tests:**
+Update the hook to select only the top 3–5 most relevant files based on symbol/keyword overlap with the prompt, keeping total output under 2KB.
+
+---
+
 ## Next tests
 
-- TEST-04 — Hybrid context (named file gets full content, others stay as skeletons)
-- TEST-05 — Token reduction measurement (target: 70–93% compression)
-- TEST-06 — PostCompact re-injection (highest-value A/B test)
+- **Fix injection size first** — implement selective injection (symbol-index keyword match, output cap ~1.5KB)
+- TEST-05 — Token reduction measurement (still valid — measures compression ratio independently of delivery)
+- TEST-06 — PostCompact re-injection (re-run after fix — this is the highest-value test)
+- Re-run TEST-02 and TEST-04 after fix
