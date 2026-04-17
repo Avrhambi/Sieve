@@ -244,6 +244,13 @@ def _get_skeletons(focal: set = None) -> str:
     from src.data.ledger import Ledger, LedgerError, set_db_path  # noqa: PLC0415
     set_db_path(_DB_PATH)
 
+    # Directory segments to exclude from skeleton injection.
+    _SKIP_DIRS = frozenset({"tests", "test", "docs", "doc", "__pycache__"})
+
+    def _should_skip(path: str) -> bool:
+        parts = path.replace("\\", "/").split("/")
+        return any(p in _SKIP_DIRS for p in parts)
+
     cwd = str(Path.cwd())
     sections: list[str] = []
     full_count = 0
@@ -252,6 +259,8 @@ def _get_skeletons(focal: set = None) -> str:
         with Ledger() as ledger:
             rows = ledger.get_files_under(cwd)
             for (path,) in rows:
+                if _should_skip(path):
+                    continue
                 cache = ledger.get_cache(path)
                 try:
                     rel = Path(path).relative_to(cwd)
