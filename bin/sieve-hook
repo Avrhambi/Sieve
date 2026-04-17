@@ -196,19 +196,34 @@ def _load_max_depth() -> int:
 # Focal-file extraction — find files explicitly mentioned in the prompt
 # ---------------------------------------------------------------------------
 def _focal_files(prompt: str, cwd: str) -> set:
-    """Return absolute paths of files mentioned in the prompt."""
+    """Return absolute paths of files mentioned in the prompt.
+
+    Tries three strategies per match:
+    1. Absolute path as-is
+    2. Relative to cwd
+    3. Recursive glob under cwd (handles src-layout repos where
+       "requests/adapters.py" lives at "src/requests/adapters.py")
+    """
     import re
+    import glob as _glob
     pattern = r'[\w./\-]+\.(?:py|js|ts|jsx|tsx|md|go|rs|markdown)'
     matches = re.findall(pattern, prompt)
     focal: set = set()
     for m in matches:
-        # Try as absolute path first
+        # 1. Absolute path
         if os.path.isfile(m):
             focal.add(os.path.abspath(m))
-        # Try relative to cwd
+            continue
+        # 2. Relative to cwd
         candidate = os.path.join(cwd, m)
         if os.path.isfile(candidate):
             focal.add(os.path.abspath(candidate))
+            continue
+        # 3. Recursive search — find any file whose path ends with m
+        filename = os.path.basename(m)
+        for found in _glob.glob(os.path.join(cwd, "**", filename), recursive=True):
+            if found.replace("\\", "/").endswith(m.replace("\\", "/")):
+                focal.add(os.path.abspath(found))
     return focal
 
 # ---------------------------------------------------------------------------
