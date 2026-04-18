@@ -229,11 +229,56 @@ def _focal_files(prompt: str, cwd: str) -> set:
 # ---------------------------------------------------------------------------
 # Ledger helpers — deferred import, only reached when daemon is alive
 # ---------------------------------------------------------------------------
-def _get_skeletons(focal: set = None) -> str:
-    """Query context_cache for all non-ignored files under cwd.
+_INJECT_BUDGET = 1_500   # chars — stays under Claude Code's ~2KB inline limit
+_SKIP_DIRS = frozenset({"tests", "test", "docs", "doc", "__pycache__"})
+_STOP_WORDS = frozenset({
+    "a", "an", "the", "and", "or", "in", "of", "to", "for", "is", "are",
+    "was", "be", "on", "at", "by", "do", "it", "this", "that", "with",
+    "from", "how", "what", "where", "when", "why", "would", "could",
+    "should", "can", "i", "you", "we", "my", "your", "me", "us",
+})
 
-    Files whose absolute path is in *focal* are injected as full content
-    instead of their skeleton (hybrid context injection).
+
+def _prompt_keywords(prompt: str) -> set[str]:
+    """Extract non-trivial lowercase tokens from the prompt."""
+    import re
+    tokens = re.findall(r"[A-Za-z_]\w*", prompt)
+    return {t.lower() for t in tokens if len(t) > 2 and t.lower() not in _STOP_WORDS}
+
+
+def _score_file(path: str, symbols: list[str], summary: str, keywords: set[str], focal: set) -> float:
+    """Return a relevance score for a file given the prompt keywords."""
+    score = 0.0
+    name = Path(path).stem.lower()
+
+    # Focal-file bonus (explicitly named in prompt)
+    if os.path.abspath(path) in focal:
+        score += 10.0
+
+    # Filename matches a keyword
+    if name in keywords:
+        score += 3.0
+
+    # Each symbol that overlaps a keyword
+    for sym in symbols:
+        if sym.lower() in keywords:
+            score += 2.0
+
+    # Summary word overlap
+    if summary:
+        sum_words = {w.lower() for w in summary.split() if len(w) > 2}
+        score += len(sum_words & keywords) * 0.5
+
+    return score
+
+
+def _get_skeletons(prompt: str = "", focal: set = None) -> str:
+    """Select and inject the most relevant file skeletons for the prompt.
+
+    Scores every cached file by symbol/keyword overlap with the prompt,
+    then greedily picks files until the char budget (_INJECT_BUDGET) is
+    exhausted.  Focal files (explicitly named in the prompt) are always
+    injected first, as full content if they fit.
     """
     if focal is None:
         focal = set()
@@ -244,17 +289,15 @@ def _get_skeletons(focal: set = None) -> str:
     from src.data.ledger import Ledger, LedgerError, set_db_path  # noqa: PLC0415
     set_db_path(_DB_PATH)
 
-    # Directory segments to exclude from skeleton injection.
-    _SKIP_DIRS = frozenset({"tests", "test", "docs", "doc", "__pycache__"})
+    keywords = _prompt_keywords(prompt)
 
     def _should_skip(path: str) -> bool:
         parts = path.replace("\\", "/").split("/")
         return any(p in _SKIP_DIRS for p in parts)
 
     cwd = str(Path.cwd())
-    sections: list[str] = []
-    full_count = 0
-    skeleton_count = 0
+    candidates: list[tuple[float, str, str, str]] = []  # (score, path, rel, content)
+
     try:
         with Ledger() as ledger:
             rows = ledger.get_files_under(cwd)
@@ -262,35 +305,75 @@ def _get_skeletons(focal: set = None) -> str:
                 if _should_skip(path):
                     continue
                 cache = ledger.get_cache(path)
+                if not cache:
+                    continue
+
                 try:
-                    rel = Path(path).relative_to(cwd)
+                    rel = str(Path(path).relative_to(cwd))
                 except ValueError:
                     rel = Path(path).name
+
                 abs_path = os.path.abspath(path)
-                if abs_path in focal:
-                    # Inject full file content for focal files
+                is_focal = abs_path in focal
+
+                # Gather symbol names for this file from symbol_index.
+                sym_rows = ledger._conn.execute(
+                    "SELECT symbol_name FROM symbol_index WHERE source_file = ?",
+                    (path.replace("\\", "/"),),
+                ).fetchall()
+                symbols = [r[0] for r in sym_rows]
+
+                summary = cache["summary"] or ""
+
+                # Full content for focal files; skeleton otherwise.
+                if is_focal:
                     try:
                         with open(path, "r", errors="replace") as fh:
                             content = fh.read()
-                        sections.append(f"### {rel} [full]\n{content}")
-                        full_count += 1
+                        label = f"### {rel} [full]"
                     except OSError:
-                        # Fall back to skeleton if file can't be read
-                        if cache and cache["skeleton"]:
-                            sections.append(f"### {rel}\n{cache['skeleton']}")
-                        skeleton_count += 1
-                elif cache and cache["skeleton"]:
-                    sections.append(f"### {rel}\n{cache['skeleton']}")
-                    skeleton_count += 1
+                        content = cache["skeleton"] or ""
+                        label = f"### {rel}"
+                else:
+                    content = cache["skeleton"] or ""
+                    label = f"### {rel}"
+
+                if not content:
+                    continue
+
+                score = _score_file(path, symbols, summary, keywords, focal)
+                candidates.append((score, path, f"{label}\n{content}"))
+
     except LedgerError as exc:
         return f"[sieve] ledger locked ({exc})"
     except Exception as exc:
         return f"[sieve] ledger error ({exc})"
 
-    if full_count > 0:
-        print(f"[sieve] hybrid context: {full_count} file(s) full, {skeleton_count} skeleton(s)", file=sys.stderr)
+    if not candidates:
+        return "[sieve] no cached skeletons in ledger"
 
-    return "\n\n".join(sections) if sections else "[sieve] no cached skeletons in ledger"
+    # Sort by score descending; focal files naturally rank first (score+10).
+    candidates.sort(key=lambda x: x[0], reverse=True)
+
+    sections: list[str] = []
+    budget = _INJECT_BUDGET
+    injected = 0
+
+    for score, path, block in candidates:
+        if budget <= 0:
+            break
+        cost = len(block)
+        if cost <= budget or not sections:  # always include at least one file
+            sections.append(block)
+            budget -= cost
+            injected += 1
+
+    print(
+        f"[sieve] selective: {injected}/{len(candidates)} file(s), "
+        f"{_INJECT_BUDGET - budget} chars",
+        file=sys.stderr,
+    )
+    return "\n\n".join(sections)
 
 
 def _compact_skeleton() -> str:
@@ -356,7 +439,6 @@ def _read_prompt_text() -> str:
     if env_prompt:
         return env_prompt
     return _read_stdin_prompt()
-    return ""
 
 
 def main() -> None:
@@ -374,7 +456,7 @@ def main() -> None:
         if alive:
             prompt_text = _read_prompt_text()
             focal = _focal_files(prompt_text, str(Path.cwd()))
-            result = _get_skeletons(focal)
+            result = _get_skeletons(prompt_text, focal)
             if result.startswith("[sieve] ledger"):
                 # DB locked / error → fail fast to heuristic
                 parts.append(_file_tree_fallback())
