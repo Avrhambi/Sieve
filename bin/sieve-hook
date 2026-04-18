@@ -263,7 +263,7 @@ def _prompt_keywords(prompt: str) -> set[str]:
     return result
 
 
-def _score_file(path: str, symbols: list[str], summary: str, keywords: set[str], focal: set) -> float:
+def _score_file(path: str, symbols: list[str], keywords: set[str], focal: set) -> float:
     """Return a relevance score for a file given the prompt keywords."""
     score = 0.0
     name = Path(path).stem.lower()
@@ -281,11 +281,6 @@ def _score_file(path: str, symbols: list[str], summary: str, keywords: set[str],
     for sym in symbols:
         if sym.lower() in keywords:
             score += 2.0
-
-    # Summary word overlap
-    if summary:
-        sum_words = {w.lower() for w in summary.split() if len(w) > 2}
-        score += len(sum_words & keywords) * 0.5
 
     return score
 
@@ -352,7 +347,7 @@ def _get_skeletons(prompt: str = "", focal: set = None) -> str:
                 if not content:
                     continue
 
-                score = _score_file(path, symbols, summary, keywords, focal)
+                score = _score_file(path, symbols, keywords, focal)
                 candidates.append((score, path, f"{label}\n{content}"))
 
     except LedgerError as exc:
