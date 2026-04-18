@@ -356,9 +356,14 @@ def _get_skeletons(prompt: str = "", focal: set = None) -> str:
         if budget <= 0:
             break
         cost = len(block)
-        if cost <= budget or not sections:  # always include at least one file
+        if cost <= budget:
             sections.append(block)
             budget -= cost
+            injected += 1
+        elif not sections:
+            # First file exceeds budget — truncate it so something always lands.
+            sections.append(block[:budget] + "\n... [truncated]")
+            budget = 0
             injected += 1
 
     print(
