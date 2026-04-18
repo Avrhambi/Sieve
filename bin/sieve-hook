@@ -366,6 +366,10 @@ def _get_skeletons(prompt: str = "", focal: set = None) -> str:
     # Sort by score descending; focal files naturally rank first (score+10).
     candidates.sort(key=lambda x: x[0], reverse=True)
 
+    # If the best score is too low, the prompt is not a code question — inject nothing.
+    if candidates[0][0] < 1.0:
+        return ""
+
     sections: list[str] = []
     budget = _INJECT_BUDGET
     injected = 0
