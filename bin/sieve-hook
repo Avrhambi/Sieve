@@ -325,18 +325,11 @@ def _get_skeletons(prompt: str = "", focal: set = None) -> str:
 
                 summary = cache["summary"] or ""
 
-                # Full content for focal files; skeleton otherwise.
-                if is_focal:
-                    try:
-                        with open(path, "r", errors="replace") as fh:
-                            content = fh.read()
-                        label = f"### {rel} [full]"
-                    except OSError:
-                        content = cache["skeleton"] or ""
-                        label = f"### {rel}"
-                else:
-                    content = cache["skeleton"] or ""
-                    label = f"### {rel}"
+                # Always use skeleton in selective mode — @full is the explicit override.
+                # Focal files rank higher but are still injected as skeletons so they
+                # fit within the budget.
+                content = cache["skeleton"] or ""
+                label = f"### {rel}"
 
                 if not content:
                     continue
