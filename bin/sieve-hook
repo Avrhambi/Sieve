@@ -239,24 +239,42 @@ _STOP_WORDS = frozenset({
 })
 
 
+_STEM_SUFFIXES = ("ing", "er", "ers", "ed", "ion", "ions", "or", "ors", "ly", "ive", "tion")
+
+
+def _stem(word: str) -> str:
+    """Minimal suffix stripping — 'watching'→'watch', 'processor'→'process'."""
+    for suffix in _STEM_SUFFIXES:
+        if word.endswith(suffix) and len(word) - len(suffix) >= 3:
+            return word[: -len(suffix)]
+    return word
+
+
 def _prompt_keywords(prompt: str) -> set[str]:
-    """Extract non-trivial lowercase tokens from the prompt."""
+    """Extract non-trivial lowercase tokens from the prompt, including stemmed forms."""
     import re
     tokens = re.findall(r"[A-Za-z_]\w*", prompt)
-    return {t.lower() for t in tokens if len(t) > 2 and t.lower() not in _STOP_WORDS}
+    result: set[str] = set()
+    for t in tokens:
+        low = t.lower()
+        if len(low) > 2 and low not in _STOP_WORDS:
+            result.add(low)
+            result.add(_stem(low))
+    return result
 
 
 def _score_file(path: str, symbols: list[str], summary: str, keywords: set[str], focal: set) -> float:
     """Return a relevance score for a file given the prompt keywords."""
     score = 0.0
     name = Path(path).stem.lower()
+    name_stemmed = _stem(name)
 
     # Focal-file bonus (explicitly named in prompt)
     if os.path.abspath(path) in focal:
         score += 10.0
 
-    # Filename matches a keyword
-    if name in keywords:
+    # Filename or its stem matches a keyword
+    if name in keywords or name_stemmed in keywords:
         score += 3.0
 
     # Each symbol that overlaps a keyword
