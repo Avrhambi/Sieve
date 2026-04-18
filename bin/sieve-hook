@@ -294,32 +294,29 @@ def _get_skeletons(focal: set = None) -> str:
 
 
 def _compact_skeleton() -> str:
-    """Re-inject full architectural skeleton (PostCompact mode)."""
+    """Re-inject the pre-built architectural map (PostCompact mode).
+
+    Reads a single row from the architecture_map table — always <2KB,
+    always fits Claude Code's inline injection limit, <5ms.
+    """
     if str(_REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(_REPO_ROOT))
 
     from src.data.ledger import Ledger, LedgerError, set_db_path  # noqa: PLC0415
     set_db_path(_DB_PATH)
 
-    cwd = str(Path.cwd())
-    sections: list[str] = ["[sieve] architectural skeleton re-injection (post-compact)", ""]
+    project = Path.cwd().resolve().as_posix()
     try:
         with Ledger() as ledger:
-            rows = ledger.get_files_under(cwd)
-            for (path,) in rows:
-                cache = ledger.get_cache(path)
-                if cache and cache["skeleton"]:
-                    try:
-                        rel = Path(path).relative_to(cwd)
-                    except ValueError:
-                        rel = Path(path).name
-                    sections.append(f"### {rel}\n{cache['skeleton']}")
+            arch_map = ledger.get_architecture_map(project)
+            if arch_map:
+                return arch_map
+            # Fallback: map not yet built — return file-tree heuristic.
+            return _file_tree_fallback()
     except LedgerError as exc:
-        return f"[sieve] ledger locked — compact skeleton unavailable ({exc})"
+        return f"[sieve] ledger locked — architectural map unavailable ({exc})"
     except Exception as exc:
-        return f"[sieve] ledger error — compact skeleton unavailable ({exc})"
-
-    return "\n\n".join(sections) if len(sections) > 2 else "[sieve] no architectural skeleton available"
+        return f"[sieve] ledger error — architectural map unavailable ({exc})"
 
 # ---------------------------------------------------------------------------
 # Image cache processing — deferred import

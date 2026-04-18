@@ -252,10 +252,85 @@ async def process_file(path: Path, queue: asyncio.Queue) -> None:
             for sym_name, refs in symbols:
                 ledger.upsert_symbol(sym_name, path_str, refs)
 
+            # Rebuild the architectural map for this project.
+            _rebuild_architecture_map(ledger, _repo_root)
+
             logger.info("Cache updated: %s", path)
 
     except LedgerError as exc:
         logger.warning("Ledger error for %s: %s", path, exc)
+
+
+# ---------------------------------------------------------------------------
+# Architectural map builder
+# ---------------------------------------------------------------------------
+
+_SKIP_DIRS = frozenset({"tests", "test", "docs", "doc", "__pycache__"})
+
+def _rebuild_architecture_map(ledger, repo_root: Path) -> None:
+    """Rebuild the compact architectural map stored in the ledger.
+
+    Format per file:
+        adapters.py   — HTTPAdapter, BaseAdapter | send(), get_connection()
+    Total target: ~1,200 chars (60 chars × 20 files), always fits inline.
+    """
+    if repo_root is None:
+        return
+
+    project = repo_root.as_posix().replace("\\", "/")
+    prefix = project.rstrip("/") + "/"
+
+    try:
+        rows = ledger._conn.execute(
+            "SELECT path FROM ledger WHERE path LIKE ? AND is_ignored = 0 ORDER BY path",
+            (prefix + "%",),
+        ).fetchall()
+    except Exception:
+        return
+
+    lines: list[str] = []
+    for (path,) in rows:
+        parts = path.replace("\\", "/").split("/")
+        if any(p in _SKIP_DIRS for p in parts):
+            continue
+
+        try:
+            rel = Path(path).relative_to(repo_root).as_posix()
+        except ValueError:
+            rel = Path(path).name
+
+        # Gather symbols defined in this file from symbol_index.
+        sym_rows = ledger._conn.execute(
+            "SELECT symbol_name FROM symbol_index WHERE source_file = ? ORDER BY symbol_name",
+            (path,),
+        ).fetchall()
+
+        classes = [r[0] for r in sym_rows if r[0][0].isupper()][:3]
+        funcs   = [r[0] for r in sym_rows if not r[0][0].isupper()][:3]
+
+        parts_str = ""
+        if classes:
+            parts_str += ", ".join(classes)
+        if funcs:
+            parts_str += (" | " if classes else "") + ", ".join(f + "()" for f in funcs)
+
+        filename = Path(rel).name
+        if parts_str:
+            lines.append(f"  {filename:<22} — {parts_str}")
+        else:
+            # Fall back to summary if no symbols extracted.
+            cache = ledger._conn.execute(
+                "SELECT summary FROM context_cache WHERE file_id = ?", (path,)
+            ).fetchone()
+            summary = cache[0] if cache and cache[0] else ""
+            lines.append(f"  {filename:<22} — {summary[:60]}" if summary else f"  {filename}")
+
+    if not lines:
+        return
+
+    project_name = Path(repo_root).name
+    map_text = f"[sieve] architectural map — {project_name}\n\n" + "\n".join(lines)
+    ledger.upsert_architecture_map(project, map_text)
 
 
 # ---------------------------------------------------------------------------
