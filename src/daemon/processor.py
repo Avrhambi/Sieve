@@ -352,6 +352,17 @@ async def start_processor(root: Path) -> None:
         root, len(_gitignore_patterns),
     )
 
+    # Build the architectural map at startup if the ledger has data but no map yet.
+    try:
+        with Ledger() as ledger:
+            project = root.as_posix()
+            if not ledger.get_architecture_map(project):
+                _rebuild_architecture_map(ledger, root)
+                if ledger.get_architecture_map(project):
+                    logger.info("Architectural map built at startup")
+    except Exception as exc:
+        logger.warning("Could not build startup architectural map: %s", exc)
+
     queue = get_queue()
 
     while True:
