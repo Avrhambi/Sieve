@@ -86,11 +86,16 @@ def _check_full_bypass() -> None:
     if prompt is not None and prompt.startswith("@full"):
         # Take only the first token after @full— ignore any trailing question text.
         file_path = prompt[len("@full"):].split()[0] if prompt[len("@full"):].strip() else ""
+        _FULL_MAX_KB = 50
         try:
-            with open(file_path, "r", errors="replace") as fh:
-                contents = fh.read()
-            print(f"### {file_path}")
-            print(contents)
+            size_kb = os.path.getsize(file_path) / 1024
+            if size_kb > _FULL_MAX_KB:
+                print(f"[sieve] @full: {file_path!r} is {size_kb:.0f}KB — limit is {_FULL_MAX_KB}KB. Use a specific line range or the skeleton instead.", file=sys.stderr)
+            else:
+                with open(file_path, "r", errors="replace") as fh:
+                    contents = fh.read()
+                print(f"### {file_path}")
+                print(contents)
         except OSError as e:
             print(f"[sieve] @full: could not read {file_path!r}: {e}", file=sys.stderr)
         exit(0)
