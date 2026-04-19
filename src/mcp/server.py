@@ -99,11 +99,11 @@ mcp = FastMCP(
     "sieve",
     instructions=(
         "Sieve provides ranked, pre-digested codebase search. "
-        "Use sieve_find() instead of Grep+Read when you want to understand "
-        "which files handle a concept — it returns ranked skeletons (signatures "
-        "and docstrings, no bodies) ordered by relevance. "
-        "Use sieve_file() when you know which file you want but don't need the "
-        "full source — lower token cost than Read."
+        "Use sieve_find() BEFORE Grep or Read when exploring an unfamiliar codebase — "
+        "one call replaces 2-4 Grep+Read sequences by returning ranked skeletons "
+        "(signatures and docstrings, no bodies) for the most relevant files. "
+        "Use sieve_file() when you already know which file you want but don't need "
+        "the full source — lower token cost than Read."
     ),
 )
 
@@ -114,11 +114,13 @@ def _get_ledger() -> Ledger:
 
 @mcp.tool()
 def sieve_find(query: str, max_results: int = 5) -> str:
-    """Search the codebase for files related to a concept or feature.
+    """Use this BEFORE Grep or Read when exploring an unfamiliar codebase.
 
-    Returns ranked file skeletons (class/function signatures + docstrings,
-    no bodies) ordered by relevance to the query.  Much cheaper than
-    Grep+Read: one call returns structured understanding instead of raw lines.
+    Returns ranked file skeletons (signatures + docstrings, no bodies) for
+    files related to the query. One call replaces 2-4 Grep+Read sequences.
+
+    Best for: architecture questions, finding where a concept lives,
+    understanding which files to read before reading them.
 
     Args:
         query: Natural language description of what you're looking for.
