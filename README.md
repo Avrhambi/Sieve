@@ -136,7 +136,7 @@ pytest tests/ -v --tb=short
 | `test_benchmark.py` | Reduction + semantic preservation, 3 languages |
 | `test_mcp.py` | MCP scoring logic, keyword extraction, stemming |
 
-For manual functional tests (PostCompact, @full, MCP search), see [`tests/TESTING.md`](tests/TESTING.md).
+For manual functional tests (PostCompact, @full, MCP search), see [`tests/testing-guide.md`](tests/testing-guide.md).
 
 ## Roadmap
 
