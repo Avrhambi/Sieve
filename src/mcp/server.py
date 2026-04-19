@@ -136,6 +136,8 @@ def sieve_find(query: str, max_results: int = 5) -> str:
     try:
         with _get_ledger() as ledger:
             rows = ledger.get_files_under(cwd)
+            scored: dict[str, tuple[float, str, str]] = {}  # path → (score, rel, skeleton)
+
             for (path,) in rows:
                 if _should_skip(path):
                     continue
@@ -158,7 +160,28 @@ def sieve_find(query: str, max_results: int = 5) -> str:
                 except ValueError:
                     rel = Path(path).name
 
-                candidates.append((score, path, rel, cache["skeleton"]))
+                scored[path] = (score, rel, cache["skeleton"])
+
+            # Second-degree: files that import a top-scoring file at 50% discount.
+            for path, (score, _rel, _sk) in list(scored.items()):
+                norm = path.replace("\\", "/")
+                importers = ledger._conn.execute(
+                    'SELECT DISTINCT source_file FROM symbol_index WHERE "references" LIKE ?',
+                    (f"%{norm}%",),
+                ).fetchall()
+                for (imp_path,) in importers:
+                    if imp_path in scored or _should_skip(imp_path):
+                        continue
+                    imp_cache = ledger.get_cache(imp_path)
+                    if not imp_cache or not imp_cache["skeleton"]:
+                        continue
+                    try:
+                        imp_rel = str(Path(imp_path).relative_to(cwd))
+                    except ValueError:
+                        imp_rel = Path(imp_path).name
+                    scored[imp_path] = (score * 0.5, imp_rel, imp_cache["skeleton"])
+
+            candidates = [(s, p, r, sk) for p, (s, r, sk) in scored.items()]
 
     except Exception as exc:
         return f"<sieve_result error='ledger unavailable: {exc}'/>"
