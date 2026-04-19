@@ -250,10 +250,80 @@ All A/B tests run on psf/requests (TEST-02, TEST-04, and the session-state quest
 
 ---
 
+## TEST-08 — MCP server (sieve_find / sieve_file)
+
+**Status: PASS — 0 additional tool calls, 3 correct files returned**
+
+**What it tests:** Does the MCP tool surface the right files for a concept query, and can Claude answer from the result without extra tool calls?
+
+**Architecture pivot:** Hook-based injection is limited by Claude Code's ~2KB inline limit. MCP tools bypass this entirely — Claude pulls structured search results on demand, at the right moment, with no size cap.
+
+### Tools implemented
+
+| Tool | Signature | What it returns |
+|---|---|---|
+| `sieve_find(query, max_results=5)` | Natural language query | Ranked XML with file skeletons, scored by keyword/symbol match |
+| `sieve_file(path)` | Relative or absolute path | Single file skeleton from ledger cache |
+
+### Scoring (mirrors hook)
+
+- Filename/stem match → +3.0
+- Symbol match → +2.0
+- Silence gate: score < 1.0 → file excluded
+- Second-degree: files that import a top hit → +50% of primary score
+
+### Import graph traversal
+
+References stored in `symbol_index` use dotted module names (`src.daemon.watcher`), not file paths. `sieve_find` converts each matched path to its module name before querying importers:
+
+```python
+module_name = str(rel_mod).replace("/", ".").removesuffix(".py")
+# → "src.daemon.watcher"
+importers = conn.execute(
+    'SELECT DISTINCT source_file FROM symbol_index WHERE "references" LIKE ?',
+    (f"%{module_name}%",)
+)
+# Added at score * 0.5
+```
+
+This was the only bug found during MCP bring-up — first version matched file paths, which returned zero results.
+
+### Validation test
+
+**Query:** `"file watching monitor file system events"`
+**Project:** Sieve repo
+
+| File | Score | How selected |
+|---|---|---|
+| `src/daemon/watcher.py` | 3 | Filename "watcher" matched stem of "watching" |
+| `src/daemon/processor.py` | 2 | Symbol match |
+| `src/main.py` | 2 | Symbol match |
+
+**Claude's answer:** Named all three files with correct role descriptions — zero additional tool calls.
+
+### MCP vs Grep comparison
+
+| Dimension | Grep | sieve_find |
+|---|---|---|
+| Returns | Raw matching lines | Pre-built skeletons (signatures + docstrings) |
+| Relevance ranking | None (all matches equal) | Scored by filename + symbol match |
+| Token cost per result | High (full line context) | Low (skeleton only) |
+| Requires daemon | No | Yes (needs cached ledger) |
+| Cross-file awareness | No | Yes — import graph surfaces related files |
+| Semantic search | No | No — still lexical matching |
+
+### Current limitations
+
+- Lexical only — "which file handles rate limiting?" won't match `throttle.py` unless "rate" or "limit" appears as a symbol name
+- Requires daemon running and Ollama having processed the project (skeletons must be cached)
+- No semantic/embedding search — indirect questions still need manual Grep
+
+---
+
 ## Final Summary
 
 **Date:** 2026-04-18
-**Tests run:** 7 (TEST-01 through TEST-07, plus TEST-02 re-run)
+**Tests run:** 8 (TEST-01 through TEST-08, plus TEST-02 re-run)
 **Platform:** Windows 11, Git Bash, Python 3.14, Claude Sonnet 4.6
 **Test projects:** psf/requests (contaminated), Sieve repo (valid)
 
@@ -269,6 +339,8 @@ All A/B tests run on psf/requests (TEST-02, TEST-04, and the session-state quest
 | Focal file injection (TEST-04) | 1 vs 2+ tool calls, Claude cited hook | Medium — correct file selected, truncation limits detail |
 | @full override | TEST-03: 0 tool calls | High for implementation questions |
 | Minimum score gate | Verified: silent on meta-questions | Correctness fix |
+| MCP sieve_find | TEST-08: 3 correct files, 0 extra tool calls | High — no size limit, on-demand |
+| MCP sieve_file | Validated alongside sieve_find | High — cheaper than Read for known files |
 
 ### What doesn't work / was cut
 
@@ -286,7 +358,8 @@ All A/B tests run on psf/requests (TEST-02, TEST-04, and the session-state quest
 4. **Scoring: focal (+10) + filename (+3) + symbol (+2)** — summary overlap removed as noise
 5. **Stemming** — "watching" → "watch" matches "watcher.py"
 6. **Silence gate (score < 1.0)** — hook stays quiet on meta-questions and follow-ups
+7. **MCP over hook for pull-based search** — MCP bypasses the 2KB inline limit entirely; hook is best for passive orientation, MCP for active search
 
 ### Honest assessment
 
-Sieve delivers clear value in two scenarios: **PostCompact recovery** (injecting the architectural map after context wipe) and **file-tree orientation on unfamiliar codebases** (zero-dependency fallback). The selective injection path works but its ceiling is lexical — it misses indirect questions where the right file has an unrelated name. The tool is past proof-of-concept and has a clean fallback chain, but Ollama is a load-bearing dependency for skeleton injection and should be treated as such.
+Sieve delivers clear value in three scenarios: **PostCompact recovery** (architectural map after context wipe), **file-tree orientation on unfamiliar codebases** (zero-dependency fallback), and **MCP on-demand search** (Claude pulls ranked skeletons when it needs them, no size cap). The hook's ceiling remains lexical — indirect questions miss — but the MCP layer makes that a solvable problem: a future embedding index plugs in behind the same `sieve_find` interface without changing how Claude calls it. The tool is past proof-of-concept; Ollama is still load-bearing for skeleton generation.
