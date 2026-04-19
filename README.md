@@ -130,6 +130,11 @@ pytest tests/test_skeleton.py -v       # AST stripping unit tests
 pytest tests/test_integration.py -v   # Latency + token reduction benchmarks
 ```
 
+## Roadmap
+
+- [ ] **Embedding index** — semantic search behind `sieve_find` using `nomic-embed-text` via Ollama. Same interface, no lexical ceiling.
+- [ ] **Standalone CLI** — `sieve search <query>` and `sieve file <path>` as first-class terminal commands, independent of Claude Code.
+
 ## License
 
 MIT

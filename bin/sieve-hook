@@ -230,6 +230,68 @@ def _focal_files(prompt: str, cwd: str) -> set:
 # Ledger helpers — deferred import, only reached when daemon is alive
 # ---------------------------------------------------------------------------
 _INJECT_BUDGET = 1_500   # chars — stays under Claude Code's ~2KB inline limit
+
+
+def _smart_truncate(skeleton: str, budget: int) -> str:
+    """Smarter skeleton slice: module docstring → all signatures → per-def docstrings.
+
+    Instead of cutting mid-line, extracts the highest-value structural pieces
+    and fits as many as possible within the budget without breaking early.
+    """
+    import re
+    lines = skeleton.splitlines(keepends=True)
+
+    # Collect everything before the first def/class as the module header.
+    module_header = []
+    i = 0
+    while i < len(lines) and not re.match(r'\s*(class |def |async def |@)', lines[i]):
+        module_header.append(lines[i])
+        i += 1
+
+    # Collect each def/class block: decorators + signature + immediate docstring.
+    blocks: list[str] = []
+    while i < len(lines):
+        block_lines: list[str] = []
+        while i < len(lines) and lines[i].lstrip().startswith('@'):
+            block_lines.append(lines[i])
+            i += 1
+        if i >= len(lines):
+            break
+        if not re.match(r'\s*(class |def |async def )', lines[i]):
+            i += 1
+            continue
+        block_lines.append(lines[i])
+        i += 1
+        # Skip blanks, then grab a docstring if present.
+        while i < len(lines) and not lines[i].strip():
+            i += 1
+        if i < len(lines):
+            stripped = lines[i].strip()
+            if stripped.startswith(('"""', "'''")):
+                quote = '"""' if stripped.startswith('"""') else "'''"
+                block_lines.append(lines[i])
+                if not (stripped.endswith(quote) and len(stripped) > 3):
+                    i += 1
+                    while i < len(lines):
+                        block_lines.append(lines[i])
+                        if lines[i].strip().endswith(quote):
+                            i += 1
+                            break
+                        i += 1
+                else:
+                    i += 1
+        blocks.append(''.join(block_lines))
+
+    # Assemble: header first, then blocks that fit — don't break early so
+    # small blocks after a large one still land.
+    out = ''.join(module_header)
+    for block in blocks:
+        if len(out) + len(block) <= budget:
+            out += block
+
+    if len(out.rstrip()) < len(skeleton.rstrip()):
+        out = out.rstrip() + '\n... [truncated]\n'
+    return out
 _SKIP_DIRS = frozenset({"tests", "test", "docs", "doc", "__pycache__"})
 _STOP_WORDS = frozenset({
     "a", "an", "the", "and", "or", "in", "of", "to", "for", "is", "are",
@@ -378,8 +440,10 @@ def _get_skeletons(prompt: str = "", focal: set = None) -> str:
             budget -= cost
             injected += 1
         elif not sections:
-            # First file exceeds budget — truncate it so something always lands.
-            sections.append(block[:budget] + "\n... [truncated]")
+            # First file exceeds budget — smart-truncate: module docstring + all signatures.
+            nl = block.index('\n') + 1
+            label, content = block[:nl], block[nl:]
+            sections.append(label + _smart_truncate(content, budget - len(label)))
             budget = 0
             injected += 1
 
