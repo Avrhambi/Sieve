@@ -126,9 +126,17 @@ Edit `config/sieve.config.toml`:
 ## Tests
 
 ```bash
-pytest tests/test_skeleton.py -v       # AST stripping unit tests
-pytest tests/test_integration.py -v   # Latency + token reduction benchmarks
+pytest tests/ -v --tb=short
 ```
+
+| File | What it covers |
+|---|---|
+| `test_skeleton.py` | AST stripping — Python, JS, TS, Markdown |
+| `test_integration.py` | Hook latency <50ms, token reduction >70% |
+| `test_benchmark.py` | Reduction + semantic preservation, 3 languages |
+| `test_mcp.py` | MCP scoring logic, keyword extraction, stemming |
+
+For manual functional tests (PostCompact, @full, MCP search), see [`tests/TESTING.md`](tests/TESTING.md).
 
 ## Roadmap
 
