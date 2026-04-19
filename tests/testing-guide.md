@@ -159,26 +159,86 @@ Expected: full file content (no `...` placeholders).
 
 ### TEST-03 — PostCompact re-injection
 
-**Goal:** After `/compact`, Claude recovers structural knowledge from the injected architectural map.
+**Goal:** After `/compact`, Claude recovers structural knowledge from the injected architectural map with zero tool calls.
 
-**Steps:**
-1. Have a conversation in Claude Code and run `/compact`
-2. Immediately after compact, send:
-```
-What are the main classes in this project and where are they defined? List exact file paths.
+**Why this test needs a large project:** The original evidence (TEST-06 in `plan/tests_results.md`) was collected on psf/requests — 28 files, partially known to Claude from training. On that project Claude recovers in 1 tool call anyway. The test is valid but understates the real value. This protocol fixes that.
+
+---
+
+#### TEST-03A — Retest on a 100+ file private codebase (the number that matters)
+
+**Project requirements:**
+- 100+ Python source files
+- Private or obscure enough that Claude has no training knowledge of it
+- Daemon has been running against it long enough to populate `ledger.db`
+
+**Suggested project if you don't have one:**
+Clone an obscure but well-structured open source Python project Claude is unlikely to know (avoid top-1000 GitHub stars). Good candidates: domain-specific tools, internal-framework ports, or mid-size scientific Python libraries.
+
+**Verify file count before starting:**
+```bash
+find $PROJECT -name "*.py" | grep -v __pycache__ | wc -l
+# Must be ≥ 100 for this test to be meaningful
 ```
 
-**Expected (Mode B — Sieve PostCompact):** Claude names correct classes with file paths — zero tool calls to answer.
+**Setup:**
+1. Start daemon: `python src/main.py $PROJECT`
+2. Wait for cache to populate (check with the DB query from Quick Start)
+3. Open Claude Code in `$PROJECT` with the PostCompact hook configured
+4. Have a real working session — ask questions, read files — until the context fills or run `/compact` manually
+
+**Mode A (baseline — PostCompact hook disabled):**
+
+Remove the PostCompact entry from `.claude/settings.json`, then run `/compact`. Immediately send:
+```
+What are the main components of this system and where are they defined? List the key files and what each one is responsible for.
+```
+
+Record every tool call Claude makes to reconstruct its orientation.
+
+**Mode B (PostCompact hook enabled):**
+
+Restore the hook, restart, repeat the same session and `/compact`. Send the same prompt immediately after.
 
 **A/B scorecard:**
 
-| Dimension | Mode A — no PostCompact | Mode B — Sieve PostCompact |
+| Dimension | Mode A — no map | Mode B — with map |
 |---|---|---|
-| Named correct files? | | |
-| Named correct classes? | | |
-| Tool calls to recover? | 2–4 | 0 |
-| Had to re-explain structure? | Y | N |
+| Tool calls to orient after compact | count | count |
+| Named correct files without searching? | Y / N | Y / N |
+| Named correct classes/functions? | Y / N | Y / N |
+| Wrong guesses / backtracking? | count | count |
+| Time to first correct answer (approx) | seconds | seconds |
 | Verdict | baseline | |
+
+**What a strong result looks like:** Mode A makes 4–8 tool calls (Grep → Read → wrong file → Grep again). Mode B makes 0. That's the number that makes the value proposition obvious.
+
+**Record the result in `plan/tests_results.md` as TEST-09.**
+
+---
+
+#### TEST-03B — Small project baseline (the original test, for reference)
+
+Run the same protocol on psf/requests (28 files). This confirms the result scales — not that the tool works on small projects.
+
+**Expected:** Mode A: 1–2 tool calls. Mode B: 0. Delta is small. This is the *floor*, not the ceiling.
+
+---
+
+**Quick-switch commands:**
+
+```bash
+# Disable PostCompact (Mode A)
+python3 -c "
+import json
+s = json.load(open('$PROJECT/.claude/settings.json'))
+s.get('hooks', {}).pop('PostCompact', None)
+json.dump(s, open('$PROJECT/.claude/settings.json', 'w'), indent=2)
+" && echo "Mode A — PostCompact OFF"
+
+# Re-enable PostCompact (Mode B)
+cp $PROJECT/.claude/settings.json.bak $PROJECT/.claude/settings.json && echo "Mode B — PostCompact ON"
+```
 
 ---
 
