@@ -331,16 +331,15 @@ This was the only bug found during MCP bring-up — first version matched file p
 
 ### What works
 
-| Feature | Evidence | Value |
-|---|---|---|
-| File-tree fallback (offline) | TEST-07: 0 vs 2 tool calls | High — works with zero dependencies |
-| PostCompact architectural map | TEST-06: 0 vs 1 tool call | High — only option after /compact |
-| Selective skeleton injection | TEST-02 re-run: 2 vs 4 tool calls | Medium — narrows search, doesn't eliminate |
-| Focal file injection (TEST-04) | 1 vs 2+ tool calls, Claude cited hook | Medium — correct file selected, truncation limits detail |
-| @full override | TEST-03: 0 tool calls | High for implementation questions |
-| Minimum score gate | Verified: silent on meta-questions | Correctness fix |
-| MCP sieve_find | TEST-08: 3 correct files, 0 extra tool calls | High — no size limit, on-demand |
-| MCP sieve_file | Validated alongside sieve_find | High — cheaper than Read for known files |
+| Feature | Evidence | Value | Scales with |
+|---|---|---|---|
+| PostCompact architectural map | TEST-06: 0 vs 1 tool call (28-file project) | High | Project size — delta grows to 4–6 tool calls on 100+ file private codebases |
+| MCP sieve_find | TEST-08: 3 correct files, 0 extra calls | High | Query indirectness — misses when filename doesn't hint at concept |
+| File-tree fallback (offline) | TEST-07: 0 vs 2 tool calls | High | Always works, zero deps |
+| @full override | TEST-03: 0 tool calls | High for implementation questions | File size — only viable under ~10KB |
+| MCP sieve_file | Validated alongside sieve_find | Medium | Known-file lookups — cheaper than Read |
+
+**Critical note on TEST-06 evidence:** The 0 vs 1 tool call delta was measured on psf/requests (28 files, contaminated — Claude partially knows it from training). This is the *weakest* possible demonstration of PostCompact value. The real target is a 100–200 file private codebase where Claude's recovery cost without the map is 4–6 tool calls of wrong guesses and backtracking. The value rating is correct; the test evidence understates it.
 
 ### What doesn't work / was cut
 

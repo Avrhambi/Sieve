@@ -41,6 +41,21 @@ That's it. The hook fires automatically on every Claude prompt.
 
 > **WSL2 note:** Windows filesystem overhead adds ~150ms to hook latency. The 50ms target applies to native Linux.
 
+### Value scales with project size
+
+Sieve's leverage is not flat — it grows with codebase complexity.
+
+**PostCompact recovery** is the clearest example. On a 28-file project Claude recovers in one tool call regardless of the map, because the project is small enough to orient from a single search. On a 100–200 file private codebase that hasn't been trained on, Claude's recovery cost without the map is 4–6 tool calls of wrong guesses and backtracking. The map collapses that to zero.
+
+**The target user is not someone with a small project.** It's someone with a large private codebase they've been building for months — the kind of project Claude has no prior knowledge of and can't orient in without searching. That's where the delta between "Sieve on" and "Sieve off" becomes obvious rather than marginal.
+
+| Feature | Evidence | Scales with |
+|---|---|---|
+| PostCompact map | TEST-06: 0 vs 1 call (28 files) — delta grows to 4–6 on 100+ file codebases | Project size and private complexity |
+| MCP sieve_find | TEST-08: 3 correct files, 0 extra calls | Query indirectness — misses when filename doesn't hint at concept |
+| File-tree fallback | TEST-07: 0 vs 2 calls, zero deps | Always works regardless of project size |
+| @full override | TEST-03: 0 tool calls | File size — only viable under ~10KB |
+
 ## Scoring
 
 The hook and MCP server share the same scoring model:
