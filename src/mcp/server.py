@@ -163,11 +163,18 @@ def sieve_find(query: str, max_results: int = 5) -> str:
                 scored[path] = (score, rel, cache["skeleton"])
 
             # Second-degree: files that import a top-scoring file at 50% discount.
+            # references stores module names (e.g. "src.daemon.watcher"), not paths.
             for path, (score, _rel, _sk) in list(scored.items()):
-                norm = path.replace("\\", "/")
+                # Convert path to dotted module name: src/daemon/watcher.py → src.daemon.watcher
+                try:
+                    rel_mod = Path(path).relative_to(cwd)
+                except ValueError:
+                    rel_mod = Path(path)
+                module_name = str(rel_mod).replace("\\", "/").replace("/", ".").removesuffix(".py")
+
                 importers = ledger._conn.execute(
                     'SELECT DISTINCT source_file FROM symbol_index WHERE "references" LIKE ?',
-                    (f"%{norm}%",),
+                    (f"%{module_name}%",),
                 ).fetchall()
                 for (imp_path,) in importers:
                     if imp_path in scored or _should_skip(imp_path):
