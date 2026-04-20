@@ -29,13 +29,19 @@ _SUPPORTED_EXTS: frozenset[str] = frozenset(
     {".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".rs"} | MARKDOWN_EXTS
 )
 
-# Module-level queue shared with processor.py.
+# Module-level queues shared with processor.py and snapshot_writer.py.
 _file_queue: asyncio.Queue[Path] = asyncio.Queue()
+_commit_queue: asyncio.Queue[str] = asyncio.Queue()
 
 
 def get_queue() -> asyncio.Queue[Path]:
     """Return the shared inter-coroutine file queue."""
     return _file_queue
+
+
+def get_commit_queue() -> asyncio.Queue[str]:
+    """Return the shared commit-event queue (yields short commit hashes)."""
+    return _commit_queue
 
 
 # ---------------------------------------------------------------------------
@@ -105,16 +111,50 @@ class _SieveHandler(FileSystemEventHandler):
         root: Path,
         loop: asyncio.AbstractEventLoop,
         queue: asyncio.Queue[Path],
+        commit_queue: asyncio.Queue[str],
         patterns: list[str],
     ) -> None:
         super().__init__()
         self._root = root
         self._loop = loop
         self._queue = queue
+        self._commit_queue = commit_queue
         self._patterns = patterns
+
+    def _read_head(self) -> str | None:
+        """Return the first 12 chars of the current commit hash, or None.
+
+        Follows .git/HEAD → .git/refs/heads/<branch>. On `git commit --amend`,
+        COMMIT_EDITMSG fires before HEAD updates, so this may briefly return
+        the previous commit; acceptable for v1 snapshots.
+        """
+        try:
+            head_text = (self._root / ".git" / "HEAD").read_text().strip()
+            if head_text.startswith("ref: "):
+                ref_path = self._root / ".git" / head_text[5:]
+                return ref_path.read_text().strip()[:12]
+            return head_text[:12]  # detached HEAD
+        except OSError:
+            return None
 
     def _enqueue(self, src_path: str) -> None:
         path = Path(src_path)
+
+        # Commit signal: COMMIT_EDITMSG is rewritten by git on every commit.
+        # Name-check before extension filter (this file has no suffix).
+        if (
+            path.name == "COMMIT_EDITMSG"
+            and len(path.parts) >= 2
+            and path.parts[-2] == ".git"
+        ):
+            commit_hash = self._read_head()
+            if commit_hash:
+                logger.debug("Commit detected: %s", commit_hash)
+                self._loop.call_soon_threadsafe(
+                    self._commit_queue.put_nowait, commit_hash
+                )
+            return
+
         if path.suffix.lower() not in _SUPPORTED_EXTS:
             return
         if _is_ignored(path, self._root, self._patterns):
@@ -152,8 +192,9 @@ async def start_watcher(root: Path) -> None:
 
     loop = asyncio.get_running_loop()
     queue = get_queue()
+    commit_queue = get_commit_queue()
 
-    handler = _SieveHandler(root, loop, queue, patterns)
+    handler = _SieveHandler(root, loop, queue, commit_queue, patterns)
     observer = Observer()
     observer.schedule(handler, str(root), recursive=True)
     observer.start()

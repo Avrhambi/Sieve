@@ -66,13 +66,15 @@ async def start(root: Path) -> None:
     load_config()
     logger.info("Sieve daemon starting — watching %s", root)
 
-    from src.daemon.watcher import start_watcher
+    from src.daemon.watcher import start_watcher, get_commit_queue
     from src.daemon.processor import start_processor
     from src.daemon.heartbeat import start_heartbeat
+    from src.daemon.snapshot_writer import start_snapshot_writer
 
     tasks = [
         asyncio.create_task(start_watcher(root)),
         asyncio.create_task(start_processor(root)),
+        asyncio.create_task(start_snapshot_writer(get_commit_queue())),
         asyncio.create_task(start_heartbeat(db_path)),
     ]
 
