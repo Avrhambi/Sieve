@@ -73,8 +73,22 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             map      TEXT NOT NULL,
             built_at REAL NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS structural_snapshots (
+            commit_hash  TEXT NOT NULL,
+            filepath     TEXT NOT NULL,
+            symbol_name  TEXT NOT NULL,
+            signature    TEXT,
+            snapshot_at  INTEGER NOT NULL,
+            PRIMARY KEY (commit_hash, filepath, symbol_name)
+        );
         """
     )
+    # Additive migration: signature column on symbol_index. ALTER TABLE is not
+    # idempotent, so check first via PRAGMA table_info.
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(symbol_index)")}
+    if "signature" not in cols:
+        conn.execute("ALTER TABLE symbol_index ADD COLUMN signature TEXT")
     conn.commit()
 
 
@@ -183,19 +197,24 @@ class Ledger:
         symbol_name: str,
         source_file: str,
         references: list[str],
+        signature: str | None = None,
     ) -> None:
-        """Store or update a symbol and the files that reference it.
+        """Store or update a symbol and the modules its source file imports.
 
-        *references* is a list of file paths and is serialised as JSON.
+        *references* is the import list of the symbol's source file, serialised
+        as JSON. *signature* is the structured signature string (e.g.
+        "def foo(x: int) -> str") used by the JSON output layer; pass None for
+        languages where extraction is not implemented.
         """
         self._conn.execute(
             """
-            INSERT INTO symbol_index (symbol_name, source_file, "references")
-            VALUES (?, ?, ?)
+            INSERT INTO symbol_index (symbol_name, source_file, "references", signature)
+            VALUES (?, ?, ?, ?)
             ON CONFLICT(symbol_name, source_file) DO UPDATE SET
-                "references" = excluded."references"
+                "references" = excluded."references",
+                signature    = excluded.signature
             """,
-            (symbol_name, source_file, json.dumps(references)),
+            (symbol_name, source_file, json.dumps(references), signature),
         )
         self._conn.commit()
 
