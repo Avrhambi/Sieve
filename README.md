@@ -5,7 +5,6 @@
 - **`cs` CLI** — structured JSON output for machine consumers (scripts, prompts, diff reviews)
 - **MCP server** — ranked skeleton search callable from Claude Code
 
-No hook. No context injection on every prompt. Sieve is pull-based — you (or Claude) ask, it answers.
 
 ## What you get
 
