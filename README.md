@@ -2,7 +2,7 @@
 
 **Sieve** is a daemon-backed code index for a single project. It watches your source tree, strips every changed file to a skeleton (signatures + docstrings, no bodies), and exposes that index through two surfaces:
 
-- **`cs` CLI** — structured JSON output for machine consumers (scripts, prompts, diff reviews)
+- **`CS` CLI** — structured JSON output for machine consumers (scripts, prompts, diff reviews)
 - **MCP server** — ranked skeleton search callable from Claude Code
 
 
