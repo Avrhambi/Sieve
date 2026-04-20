@@ -61,16 +61,11 @@ python -m pip install --quiet \
     "tree-sitter-python>=0.23" \
     "tree-sitter-javascript>=0.23" \
     "tree-sitter-typescript>=0.23" \
+    "tree-sitter-markdown>=0.4" \
+    "tree-sitter-go>=0.23" \
+    "tree-sitter-rust>=0.23" \
     "mcp>=1.0"
 echo "    Core dependencies installed"
-
-echo "==> Installing OCR dependency (optional — skip if Python >3.13)..."
-if python -m pip install --quiet "rapidocr-onnxruntime>=1.3" 2>/dev/null; then
-    echo "    rapidocr-onnxruntime installed"
-else
-    echo "    WARN: rapidocr-onnxruntime skipped (not yet compatible with your Python version)"
-    echo "         OCR screenshot features will be unavailable — all other features work normally"
-fi
 
 echo "==> Checking Ollama..."
 # On Windows, Ollama is a system tray app and may not be on Git Bash PATH.
@@ -109,8 +104,7 @@ with Ledger() as l:
 print('    ledger.db initialised')
 "
 
-echo "==> Making bin/sieve-hook executable..."
-chmod +x bin/sieve-hook
-
 echo ""
-echo "Sieve installed. Run: python src/main.py to start the daemon."
+echo "Sieve installed."
+echo "  Start the daemon:   python src/main.py /path/to/your/project"
+echo "  Use the CLI:        cs repo-map --json"

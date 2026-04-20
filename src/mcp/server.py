@@ -46,7 +46,7 @@ except ImportError as exc:
     sys.exit(f"[sieve-mcp] mcp package not found — run: pip install 'mcp[cli]'\n{exc}")
 
 # ---------------------------------------------------------------------------
-# Constants — mirror bin/sieve-hook scoring
+# Scoring constants
 # ---------------------------------------------------------------------------
 _STOP_WORDS = frozenset({
     "a", "an", "the", "and", "or", "in", "of", "to", "for", "is", "are",

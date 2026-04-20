@@ -25,7 +25,6 @@ class SieveThresholds(BaseModel):
     VRAM_THRESHOLD_MB: int
     RAM_THRESHOLD_MB: int
     MAX_FILE_SIZE_KB: int
-    MAX_DEPTH: int
     OLLAMA_NUM_PARALLEL: int
 
 

@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "sieve"
 version = "0.1.0"
-description = "Sieve — context-aware coding assistant hook"
+description = "Sieve — daemon-backed code index with cs CLI and MCP server"
 authors = []
 readme = "README.md"
 packages = [{include = "src"}]
@@ -19,7 +19,6 @@ tree-sitter-typescript = "*"
 tree-sitter-markdown = "*"
 tree-sitter-go = "*"
 tree-sitter-rust = "*"
-rapidocr-onnxruntime = "*"
 mcp = "*"
 
 [tool.poetry.scripts]
