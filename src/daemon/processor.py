@@ -119,11 +119,39 @@ def _compute_ast_hash(source: bytes, ext: str) -> str:
 # Symbol extraction
 # ---------------------------------------------------------------------------
 
-def _extract_symbols(source: bytes, path: str, lang: str) -> list[tuple[str, list[str]]]:
-    """Return a list of (symbol_name, references) tuples for the given source.
+def _py_signature(node: ast.AST) -> str | None:
+    """Reconstruct a one-line signature for a Python def/class node."""
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        prefix = "async def" if isinstance(node, ast.AsyncFunctionDef) else "def"
+        try:
+            args = ast.unparse(node.args)
+        except Exception:
+            return None
+        ret = ""
+        if node.returns is not None:
+            try:
+                ret = " -> " + ast.unparse(node.returns)
+            except Exception:
+                ret = ""
+        return f"{prefix} {node.name}({args}){ret}"
+    if isinstance(node, ast.ClassDef):
+        try:
+            bases = ", ".join(ast.unparse(b) for b in node.bases)
+        except Exception:
+            bases = ""
+        return f"class {node.name}({bases})" if bases else f"class {node.name}"
+    return None
 
-    * Python: uses ast.parse to collect function/class definitions and imports.
-    * JS/TS: uses regex to collect function/class/const/let/var names and imports.
+
+def _extract_symbols(
+    source: bytes, path: str, lang: str
+) -> list[tuple[str, list[str], str | None]]:
+    """Return (symbol_name, references, signature) tuples for the given source.
+
+    * Python: uses ast.parse to collect function/class definitions and imports;
+      signatures reconstructed via ast.unparse.
+    * JS/TS: uses regex to collect names and imports; signature is None (v1
+      punts on JS/TS structured signatures).
     * Other: returns [].
     """
     ext = Path(path).suffix.lower()
@@ -135,23 +163,23 @@ def _extract_symbols(source: bytes, path: str, lang: str) -> list[tuple[str, lis
             return []
 
         imports: list[str] = []
-        symbols: list[str] = []
+        symbols: list[tuple[str, str | None]] = []
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                symbols.append(node.name)
+                symbols.append((node.name, _py_signature(node)))
             elif isinstance(node, ast.Import):
                 imports += [alias.name for alias in node.names]
             elif isinstance(node, ast.ImportFrom):
                 if node.module:
                     imports.append(node.module)
 
-        return [(sym, imports) for sym in symbols]
+        return [(name, imports, sig) for name, sig in symbols]
 
     if ext in (".js", ".ts", ".jsx", ".tsx"):
         text = source.decode("utf-8", errors="ignore")
         refs = re.findall(r"import\s+.*?\s+from\s+['\"]([^'\"]+)['\"]", text)
         names = re.findall(r"(?:function|class|const|let|var)\s+(\w+)", text)
-        return [(name, refs) for name in names]
+        return [(name, refs, None) for name in names]
 
     return []
 
@@ -249,8 +277,8 @@ async def process_file(path: Path, queue: asyncio.Queue) -> None:
 
             # Symbol extraction and upsert.
             symbols = _extract_symbols(source, path_str, lang)
-            for sym_name, refs in symbols:
-                ledger.upsert_symbol(sym_name, path_str, refs)
+            for sym_name, refs, signature in symbols:
+                ledger.upsert_symbol(sym_name, path_str, refs, signature)
 
             # Rebuild the architectural map for this project.
             _rebuild_architecture_map(ledger, _repo_root)
