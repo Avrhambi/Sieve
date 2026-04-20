@@ -68,12 +68,6 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             ts  REAL    NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS architecture_map (
-            project  TEXT PRIMARY KEY,
-            map      TEXT NOT NULL,
-            built_at REAL NOT NULL
-        );
-
         CREATE TABLE IF NOT EXISTS structural_snapshots (
             commit_hash  TEXT NOT NULL,
             filepath     TEXT NOT NULL,
@@ -242,25 +236,6 @@ class Ledger:
             (ts,),
         )
         self._conn.commit()
-
-    def upsert_architecture_map(self, project: str, map_text: str) -> None:
-        """Store the pre-built architectural map for a project."""
-        import time
-        self._conn.execute(
-            """
-            INSERT INTO architecture_map (project, map, built_at) VALUES (?, ?, ?)
-            ON CONFLICT(project) DO UPDATE SET map=excluded.map, built_at=excluded.built_at
-            """,
-            (project, map_text, time.time()),
-        )
-        self._conn.commit()
-
-    def get_architecture_map(self, project: str) -> Optional[str]:
-        """Return the pre-built architectural map text, or None."""
-        row = self._conn.execute(
-            "SELECT map FROM architecture_map WHERE project = ?", (project,)
-        ).fetchone()
-        return row["map"] if row else None
 
     def get_files_under(self, path_prefix: str) -> list[sqlite3.Row]:
         """Return all non-ignored ledger rows whose path starts with path_prefix."""
