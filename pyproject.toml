@@ -22,6 +22,9 @@ tree-sitter-rust = "*"
 rapidocr-onnxruntime = "*"
 mcp = "*"
 
+[tool.poetry.scripts]
+cs = "src.cli:main"
+
 [tool.poetry.group.dev.dependencies]
 pytest = "*"
 pytest-asyncio = "*"
