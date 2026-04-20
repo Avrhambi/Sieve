@@ -1,85 +1,80 @@
 # Sieve
 
-**Sieve** is a structural context layer for Claude Code — a local daemon that pre-digests your codebase into skeletons (signatures + docstrings, no bodies) and exposes them through two delivery mechanisms: a prompt hook that injects relevant files automatically, and an MCP server that Claude can query on demand.
+**Sieve** is a daemon-backed code index for a single project. It watches your source tree, strips every changed file to a skeleton (signatures + docstrings, no bodies), and exposes that index through two surfaces:
 
-## How It Works
+- **`cs` CLI** — structured JSON output for machine consumers (scripts, prompts, diff reviews)
+- **MCP server** — ranked skeleton search callable from Claude Code
 
-1. **Daemon watches your project.** `src/main.py` launches a file watcher, a processor, and a heartbeat. The watcher uses `watchdog` to pick up file-save events, filtered by extension (`.py`, `.js`, `.ts`, `.jsx`, `.tsx`, `.md`) and `.gitignore` rules.
+No hook. No context injection on every prompt. Sieve is pull-based — you (or Claude) ask, it answers.
 
-2. **Each changed file is skeletonized.** The processor computes an AST hash. If the hash matches what is stored, no LLM call is made — a reformatted file is a no-op. If the structure changed, `skeletonizer.py` strips function bodies using `tree-sitter`, keeping only signatures, decorators, and docstrings. Markdown files reduce to headers and links.
+## What you get
 
-3. **A one-sentence summary is generated locally.** `inference.py` selects a tier: instant regex heuristics for short or resource-constrained cases, `Qwen2.5-Coder-1.5B` via Ollama otherwise, silent fallback to heuristics if Ollama is unreachable. No VRAM required.
+| Surface | Use for |
+|---|---|
+| `cs skeleton <file> --json` | Per-file structured symbols + import edges (forward and reverse) |
+| `cs repo-map --json` | Public-interface map of the whole indexed project |
+| `cs diff --json` | Signature-level changes since the last commit — structural diff, no body noise |
+| MCP `sieve_find(query)` | Ranked skeletons for a natural-language query, with second-degree import graph |
+| MCP `sieve_file(path)` | Cached skeleton for a specific file — cheaper than `Read` |
 
-4. **Results are stored in SQLite WAL mode.** Skeleton and summary go into `ledger.db`. WAL mode lets the hook read while the processor writes — no `SQLITE_BUSY` errors.
+## How it works
 
-5. **The hook selectively injects on every prompt.** `bin/sieve-hook` fires on every `UserPromptSubmit` event. It scores all cached files against the prompt using keyword and symbol overlap, then injects only the top-scoring skeleton (up to 1,500 chars). If the best score is below 1.0, it stays silent. If the daemon is offline, it falls back to a file-tree listing.
+1. **Daemon watches your project.** `src/main.py` launches four async tasks: a `watchdog` file watcher, a processor, a snapshot writer, and a heartbeat. The watcher filters by extension (`.py`, `.js`, `.ts`, `.jsx`, `.tsx`, `.md`, `.go`, `.rs`) and `.gitignore` rules. It also routes `.git/COMMIT_EDITMSG` events to a separate commit queue.
 
-## Quick Start
+2. **Each changed file is skeletonized.** The processor computes an AST hash. If the hash is unchanged (whitespace, comment, body edits), no LLM call is made. If structure changed, `skeletonizer.py` strips function bodies via `tree-sitter`, keeping signatures, decorators, and docstrings. Markdown files reduce to headers and links.
+
+3. **Symbols and signatures are extracted.** For Python, `ast.unparse` rebuilds a one-line signature per def/class. Import edges are captured as forward references. JS/TS use regex (signatures punted for v1).
+
+4. **A one-sentence summary is generated locally.** `inference.py` calls `qwen2.5-coder:1.5b` via Ollama if available, falls back to a regex heuristic otherwise.
+
+5. **Every commit triggers a structural snapshot.** When `.git/COMMIT_EDITMSG` changes, the snapshot writer copies the current `symbol_index` into `structural_snapshots` keyed by commit hash. `cs diff` reads from this.
+
+6. **All results land in a single SQLite WAL file.** `ledger.db` at the watched project root. CLI and MCP read from it concurrently without blocking the processor.
+
+## Quick start
 
 ```bash
 bash install.sh
 ```
 
-The script creates a virtual environment, installs dependencies, pulls `qwen2.5-coder:1.5b` via Ollama, and initializes `ledger.db`.
+Creates `.venv/`, installs dependencies, pulls `qwen2.5-coder:1.5b` via Ollama if present.
 
 Start the daemon against your project:
 
 ```bash
-python3 src/main.py /path/to/your/project
+source .venv/bin/activate
+python src/main.py /path/to/your/project
 ```
 
-That's it. The hook fires automatically on every Claude prompt.
+The `cs` CLI is registered as a console script via `pyproject.toml`. After `pip install -e .` (or `poetry install`) it's on your PATH:
 
-## What You Get
-
-| | Without Sieve | With Sieve |
-|---|---|---|
-| What Claude receives | Nothing, then tool calls | Pre-scored skeleton for the most relevant file |
-| Token reduction (skeleton vs raw) | — | ~74% (validated on 386K char codebase) |
-| Hook latency (cached) | — | ~15–25ms (native Linux) |
-| Tool calls for architecture questions | 2–4 (Search + Read) | 0–2 (hook narrows to right file) |
-
-> **WSL2 note:** Windows filesystem overhead adds ~150ms to hook latency. The 50ms target applies to native Linux.
-
-### Value scales with project size
-
-Sieve's leverage is not flat — it grows with codebase complexity.
-
-**PostCompact recovery** is the clearest example. On a 28-file project Claude recovers in one tool call regardless of the map, because the project is small enough to orient from a single search. On a 100–200 file private codebase that hasn't been trained on, Claude's recovery cost without the map is 4–6 tool calls of wrong guesses and backtracking. The map collapses that to zero.
-
-**The target user is not someone with a small project.** It's someone with a large private codebase they've been building for months — the kind of project Claude has no prior knowledge of and can't orient in without searching. That's where the delta between "Sieve on" and "Sieve off" becomes obvious rather than marginal.
-
-| Feature | Evidence | Scales with |
-|---|---|---|
-| PostCompact map | TEST-06: 0 vs 1 call (28 files) — delta grows to 4–6 on 100+ file codebases | Project size and private complexity |
-| MCP sieve_find | TEST-08: 3 correct files, 0 extra calls | Query indirectness — misses when filename doesn't hint at concept |
-| File-tree fallback | TEST-07: 0 vs 2 calls, zero deps | Always works regardless of project size |
-| @full override | TEST-03: 0 tool calls | File size — only viable under ~10KB |
-
-## Scoring
-
-The hook and MCP server share the same scoring model:
-
-| Signal | Weight |
-|---|---|
-| Filename or stem matches a query keyword | +3 |
-| A symbol in the file matches a query keyword | +2 |
-| File is named in the prompt (focal bonus) | +10 |
-| Silence gate (best score < 1.0) | inject nothing |
-
-Keywords are stemmed — "watching" matches "watcher.py", "retries" matches "retry".
-
-## Override: inject a full file
-
-```
-@full path/to/file.py
+```bash
+cd /path/to/your/project
+cs repo-map --json | jq '.files[] | .path'
 ```
 
-Prefix any prompt with `@full` followed by a file path to bypass skeletonization for that one prompt. Claude receives the complete file contents with zero tool calls.
+## CLI examples
 
-## MCP Tools
+**Before removing a symbol, see who imports the file:**
+```bash
+cs skeleton src/daemon/watcher.py --json | jq '.dependencies.imported_in'
+```
 
-Register the MCP server in your project's `.claude/settings.json`:
+**Audit the project's public surface in one shot:**
+```bash
+cs repo-map --json | jq '.files[] | {path, symbols: [.symbols[].name]}'
+```
+
+**Review signature-level changes before pushing:**
+```bash
+cs diff --json | jq '.changes'
+```
+
+Without `--json`, each subcommand prints a terse human-readable rendering — one line per symbol.
+
+## MCP setup
+
+Register the server in your project's `.claude/settings.json`:
 
 ```json
 {
@@ -93,38 +88,53 @@ Register the MCP server in your project's `.claude/settings.json`:
 }
 ```
 
-Two tools are available:
+Then in Claude Code, ask structural questions:
 
-**`sieve_find(query, max_results=5)`** — Searches the codebase for files related to a concept. Returns ranked skeletons (signatures + docstrings) ordered by relevance. Uses the same keyword/symbol scoring as the hook, plus import graph traversal: files that import a top hit are included at 50% score. Much cheaper than Grep+Read — one call returns structured understanding instead of raw lines.
+> Which files handle the file-watching logic?
 
-**`sieve_file(path)`** — Returns the cached skeleton for a specific file. Use this when you already know which file you want but don't need the full source. Lower token cost than Read.
+Claude calls `sieve_find`, receives ranked skeletons + second-degree importers at 50% score, and answers without `Grep`/`Read` round-trips.
 
-If the daemon is offline or a file hasn't been processed yet, both tools return a clear error rather than silently failing.
+## Scoring
 
-## PostCompact Recovery
+`sieve_find` uses the same lexical model as the original hook:
 
-After `/compact` wipes conversation context, Sieve re-injects an architectural map — a compact one-liner-per-file listing of classes and key functions. This fires automatically via the `PostCompact` hook and fits within Claude Code's inline limit (~1.2KB), so Claude recovers structural awareness with zero tool calls.
+| Signal | Weight |
+|---|---|
+| Filename or stem matches a query keyword | +3 |
+| A symbol in the file matches a query keyword | +2 |
+| File is named in the prompt (focal bonus) | +10 |
+| Silence gate (best score < 1.0) | return no matches |
+
+Keywords are stemmed: "watching" matches "watcher.py", "retries" matches "retry".
 
 ## Architecture
 
 ```
 src/
 ├── core/
-│   ├── skeletonizer.py   # Tree-sitter AST stripping (Python, JS/TS, Markdown)
-│   ├── inference.py      # Tiered inference: heuristic → Ollama → fallback
-│   └── registry.py       # Extension → tree-sitter grammar mapping
+│   ├── skeletonizer.py       # tree-sitter AST stripping (Python, JS, TS, Markdown, Go, Rust)
+│   ├── inference.py          # Ollama → heuristic fallback
+│   └── registry.py           # extension → tree-sitter grammar
 ├── daemon/
-│   ├── watcher.py        # watchdog file-save events + .gitignore filter
-│   ├── processor.py      # Batch processing + RAM/VRAM governors
-│   └── heartbeat.py      # Liveness ticking for hook awareness
+│   ├── watcher.py            # watchdog events + .gitignore filter + commit detection
+│   ├── processor.py          # AST-hash gate, skeletonize, extract signatures
+│   ├── snapshot_writer.py    # on commit, copy symbol_index → structural_snapshots
+│   └── heartbeat.py          # liveness timestamp
 ├── data/
-│   └── ledger.py         # SQLite WAL interface (ledger, context_cache, symbol_index)
+│   └── ledger.py             # SQLite WAL: ledger, context_cache, symbol_index, structural_snapshots
+├── layers/
+│   └── json_api.py           # pure JSON producers for cs
 ├── mcp/
-│   └── server.py         # sieve_find + sieve_file via FastMCP
-└── main.py               # Daemon entry point
-bin/
-└── sieve-hook            # Claude Code hook (<50ms, fail-fast)
+│   └── server.py             # sieve_find + sieve_file via FastMCP
+├── cli.py                    # cs dispatcher
+└── main.py                   # daemon entry point
 ```
+
+## Schema notes
+
+- `symbol_index.references` stores **forward edges** (modules the source file imports), despite the name. Reverse direction is derived on-demand via JSON `LIKE` in `json_api.py` — no materialized `imported_in` table at side-project scale.
+- `symbol_index.signature` — Python signatures via `ast.unparse`; `NULL` for JS/TS.
+- `structural_snapshots` — point-in-time signatures keyed by `commit_hash`.
 
 ## Configuration
 
@@ -132,10 +142,9 @@ Edit `config/sieve.config.toml`:
 
 | Key | Default | Description |
 |---|---|---|
-| `VRAM_THRESHOLD_MB` | `500` | Min free VRAM before forcing CPU inference |
-| `RAM_THRESHOLD_MB` | `1000` | Min free RAM before pausing LLM batches |
-| `MAX_FILE_SIZE_KB` | `100` | Files larger than this are skipped |
-| `MAX_DEPTH` | `3` | Directory traversal depth for fallback heuristic |
+| `VRAM_THRESHOLD_MB` | `0` | Pause inference if free VRAM drops below this |
+| `RAM_THRESHOLD_MB` | `0` | Pause inference if available RAM drops below this |
+| `MAX_FILE_SIZE_KB` | `100` | Skip files larger than this |
 | `OLLAMA_NUM_PARALLEL` | `1` | Max concurrent Ollama requests |
 
 ## Tests
@@ -147,16 +156,26 @@ pytest tests/ -v --tb=short
 | File | What it covers |
 |---|---|
 | `test_skeleton.py` | AST stripping — Python, JS, TS, Markdown |
-| `test_integration.py` | Hook latency <50ms, token reduction >70% |
+| `test_integration.py` | Token reduction >70% on a 60-file synthetic project |
 | `test_benchmark.py` | Reduction + semantic preservation, 3 languages |
-| `test_mcp.py` | MCP scoring logic, keyword extraction, stemming |
+| `test_mcp.py` | MCP scoring, keyword extraction, stemming |
+| `test_json_api.py` | `cs` JSON output shape |
+| `test_snapshot_writer.py` | Commit-queue consumer |
+| `test_cli.py` | `cs` dispatcher and JSON round-trip |
 
-For manual functional tests (PostCompact, @full, MCP search), see [`tests/testing-guide.md`](tests/testing-guide.md).
+For manual smoke tests and the fresh-Claude validation, see [`tests/testing-guide.md`](tests/testing-guide.md).
+
+## Known limitations
+
+- **JS/TS signatures are `NULL`.** Python only for v1. `cs diff` and `cs repo-map` carry signatures for Python files; others get names only.
+- **`git commit --amend` race.** `COMMIT_EDITMSG` fires before `HEAD` updates, so a snapshot taken during an amend may lag by one commit.
+- **Lexical ceiling on `sieve_find`.** Indirect queries ("which file handles rate limiting?") miss when filenames and symbols don't contain query words.
 
 ## Roadmap
 
-- [ ] **Embedding index** — semantic search behind `sieve_find` using `nomic-embed-text` via Ollama. Same interface, no lexical ceiling.
-- [ ] **Standalone CLI** — `sieve search <query>` and `sieve file <path>` as first-class terminal commands, independent of Claude Code.
+- [ ] **Embedding index** — semantic search behind `sieve_find` via `nomic-embed-text`. Same interface, no lexical ceiling.
+- [ ] **JS/TS signature extraction** — replace regex with tree-sitter.
+- [ ] **MCP wrappers for `cs`** — once the JSON schema is validated end-to-end.
 
 ## License
 
