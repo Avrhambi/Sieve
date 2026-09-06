@@ -13,17 +13,16 @@ from __future__ import annotations
 import ast
 import asyncio
 import hashlib
-import json
 import logging
 import re
 from pathlib import Path
 
+from src.config import load_config
 from src.core.skeletonizer import skeletonize
 from src.core.inference import summarize
 from src.data.ledger import Ledger, LedgerError
 import src.main as _main_module
 from src.daemon.watcher import get_queue, _load_gitignore_patterns, _is_ignored
-from src.main import load_config
 
 logger = logging.getLogger(__name__)
 

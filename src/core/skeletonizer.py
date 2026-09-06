@@ -7,7 +7,7 @@ from __future__ import annotations
 import re
 from tree_sitter import Node, Parser
 
-from src.main import load_config
+from src.config import load_config
 from src.core.registry import MARKDOWN_EXTS, get_language
 
 # Maps language name strings to canonical file extension keys.
@@ -341,6 +341,14 @@ _LINK_RE = re.compile(r"\[.+?\]\(.+?\)")
 
 
 def _skeletonize_markdown(source: bytes) -> str:
+    """Extract structure from Markdown, preserving a trailing newline if present."""
+    result = _skeletonize_markdown_impl(source)
+    if source.endswith(b"\n") and result and not result.endswith("\n"):
+        result += "\n"
+    return result
+
+
+def _skeletonize_markdown_impl(source: bytes) -> str:
     """Extract structure from Markdown using tree-sitter-markdown."""
     try:
         import tree_sitter_markdown as ts_md  # type: ignore

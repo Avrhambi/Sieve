@@ -26,7 +26,6 @@ Register in .claude/settings.json:
 """
 from __future__ import annotations
 
-import re
 import sys
 import os
 from pathlib import Path
@@ -46,50 +45,10 @@ except ImportError as exc:
     sys.exit(f"[sieve-mcp] mcp package not found — run: pip install 'mcp[cli]'\n{exc}")
 
 # ---------------------------------------------------------------------------
-# Scoring constants
+# Scoring helpers (extracted to src.mcp.scoring so tests can import them
+# without FastMCP / a live ledger)
 # ---------------------------------------------------------------------------
-_STOP_WORDS = frozenset({
-    "a", "an", "the", "and", "or", "in", "of", "to", "for", "is", "are",
-    "was", "be", "on", "at", "by", "do", "it", "this", "that", "with",
-    "from", "how", "what", "where", "when", "why", "would", "could",
-    "should", "can", "i", "you", "we", "my", "your", "me", "us",
-})
-_STEM_SUFFIXES = ("ing", "er", "ers", "ed", "ion", "ions", "or", "ors", "ly", "ive", "tion")
-_SKIP_DIRS = frozenset({"tests", "test", "docs", "doc", "__pycache__"})
-
-
-def _stem(word: str) -> str:
-    for suffix in _STEM_SUFFIXES:
-        if word.endswith(suffix) and len(word) - len(suffix) >= 3:
-            return word[: -len(suffix)]
-    return word
-
-
-def _keywords(query: str) -> set[str]:
-    tokens = re.findall(r"[A-Za-z_]\w*", query)
-    result: set[str] = set()
-    for t in tokens:
-        low = t.lower()
-        if len(low) > 2 and low not in _STOP_WORDS:
-            result.add(low)
-            result.add(_stem(low))
-    return result
-
-
-def _should_skip(path: str) -> bool:
-    parts = path.replace("\\", "/").split("/")
-    return any(p in _SKIP_DIRS for p in parts)
-
-
-def _score(path: str, symbols: list[str], keywords: set[str]) -> float:
-    score = 0.0
-    name = Path(path).stem.lower()
-    if name in keywords or _stem(name) in keywords:
-        score += 3.0
-    for sym in symbols:
-        if sym.lower() in keywords:
-            score += 2.0
-    return score
+from src.mcp.scoring import _keywords, _should_skip, _score  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

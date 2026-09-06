@@ -20,7 +20,7 @@ from watchdog.events import (
 from watchdog.observers import Observer
 
 from src.core.registry import MARKDOWN_EXTS
-from src.main import load_config
+from src.config import load_config
 
 logger = logging.getLogger(__name__)
 

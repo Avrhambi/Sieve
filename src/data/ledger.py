@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
-from src.main import load_config
+from src.config import load_config
 
 _DB_PATH = Path(__file__).parent.parent.parent / "ledger.db"
 _LOCK_TIMEOUT_MS = 500
@@ -150,7 +150,7 @@ class Ledger:
 
     def delete_file(self, path: str) -> None:
         """Remove a file record (cascades to context_cache)."""
-        self._conn.execute("DELETE FROM ledger WHERE path = ?", (path,))
+        self._conn.execute("DELETE FROM ledger WHERE path = ?", (self._norm(path),))
         self._conn.commit()
 
     # ------------------------------------------------------------------
@@ -208,7 +208,7 @@ class Ledger:
                 "references" = excluded."references",
                 signature    = excluded.signature
             """,
-            (symbol_name, source_file, json.dumps(references), signature),
+            (symbol_name, self._norm(source_file), json.dumps(references), signature),
         )
         self._conn.commit()
 
@@ -218,7 +218,7 @@ class Ledger:
         """Return the symbol_index row, or None."""
         return self._conn.execute(
             "SELECT * FROM symbol_index WHERE symbol_name = ? AND source_file = ?",
-            (symbol_name, source_file),
+            (symbol_name, self._norm(source_file)),
         ).fetchone()
 
     def get_references(self, symbol_name: str, source_file: str) -> list[str]:
