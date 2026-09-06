@@ -1,6 +1,6 @@
 # Sieve — Testing Guide
 
-Last updated: 2026-04-20
+Last updated: 2026-09-06
 
 ---
 
@@ -32,7 +32,7 @@ cd $SIEVE
 bash install.sh
 ```
 
-Creates `.venv/`, installs dependencies, pulls `qwen2.5-coder:1.5b` via Ollama (optional — heuristic fallback runs without it).
+Creates `.venv/`, installs dependencies (tree-sitter grammars, `watchdog`, `pydantic`, `mcp`), initializes `ledger.db`. No model download, no GPU.
 
 ### 2. Start the daemon
 
@@ -75,13 +75,16 @@ python3 -m pytest tests/ -v --tb=short
 
 | File | What it covers |
 |---|---|
-| `test_skeleton.py` | AST stripping — Python, JS, TS, Markdown |
-| `test_integration.py` | Token reduction >70% on a 60-file synthetic project |
-| `test_benchmark.py` | Reduction + semantic preservation, 3 languages |
-| `test_mcp.py` | MCP scoring logic, keyword extraction, stemming |
-| `test_json_api.py` | `cs` JSON output shape — skeleton, repo-map, diff |
-| `test_snapshot_writer.py` | Commit-queue consumer writes structural snapshots |
-| `test_cli.py` | `cs` subcommand dispatch and JSON round-trip |
+| `test_skeleton.py` | AST stripping — Python, JS, TS, Markdown, Go, Rust (27) |
+| `test_determinism.py` | Byte-identical index across reruns; `PYTHONHASHSEED` cross-process; AST-hash gate (26) |
+| `test_mcp.py` | MCP scoring logic, keyword extraction, stemming (26) |
+| `test_json_api.py` | `cs` JSON output shape — skeleton, repo-map, diff (8) |
+| `test_benchmark.py` | Reduction + semantic preservation, 3 languages (7) |
+| `test_cli.py` | `cs` subcommand dispatch and JSON round-trip (5) |
+| `test_snapshot_writer.py` | Commit-queue consumer writes structural snapshots (4) |
+| `test_integration.py` | Token reduction >70% on a 60-file synthetic project (1) |
+
+Total: 104. Benchmark method and measured numbers: [`../docs/benchmarks.md`](../docs/benchmarks.md).
 
 ---
 
@@ -174,10 +177,9 @@ Open a fresh Claude session (no prior context). Paste both files. Ask:
 |---|---|---|
 | File > `MAX_FILE_SIZE_KB` | Write a file larger than the configured limit | Daemon skips it silently |
 | Syntax error in `.py` | Save `def foo(:` | Falls back to SHA-256 hash; no crash |
-| Rapid saves (10× in 2s) | Loop `touch file.py` | AST-hash gate fires; re-summary called once |
+| Rapid saves (10× in 2s) | Loop `touch file.py` | AST-hash gate fires; skeletonize/summarize run once |
 | File deleted while watching | `rm file.py` while daemon runs | No crash |
 | Gitignored file | Add to `.gitignore`, save it | Indexed as `is_ignored=1`, not processed |
-| Ollama not running | Stop Ollama, save a file | Falls back to heuristic summary; no crash |
 | `git commit --amend` | Amend a commit | Snapshot may lag by one commit (documented limitation) |
 
 ---
@@ -186,10 +188,9 @@ Open a fresh Claude session (no prior context). Paste both files. Ask:
 
 | Message | Meaning |
 |---|---|
-| `AST unchanged — no re-summary` | Comment/whitespace edit — no LLM call |
+| `AST unchanged — no re-summary` | Comment/whitespace edit — skeletonize/summarize skipped |
 | `Cache updated` | Structural change processed |
 | `Snapshot written for commit <hash>` | snapshot_writer consumed a commit event |
-| `Ollama unreachable — falling back to heuristic` | Ollama down; heuristic used |
 | `Shutdown signal received — processor exiting` | Clean Ctrl+C shutdown |
 
 ---
