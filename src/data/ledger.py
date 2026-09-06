@@ -4,7 +4,6 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
-from src.config import load_config
 
 _DB_PATH = Path(__file__).parent.parent.parent / "ledger.db"
 _LOCK_TIMEOUT_MS = 500

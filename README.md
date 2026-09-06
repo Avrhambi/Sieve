@@ -16,7 +16,7 @@ who depends on it" questions.
 
 Sieve pre-digests the tree into that structural layer once, incrementally, on
 file save. A query returns ranked skeletons plus the import graph instead of raw
-files. Measured on this repo's own source, a skeleton is **57.9% smaller** than the
+files. Measured on this repo's own source, a skeleton is **58% smaller** than the
 file (character count); on body-heavy code it reaches **74.8–88.9%** — see
 [`docs/benchmarks.md`](docs/benchmarks.md).
 
@@ -144,7 +144,7 @@ counts** (`len()` on text) — a proxy for token savings, not a tokenizer count.
 |---|---|---|
 | Test suite | 111 passed, ~1.9s | `python -m pytest tests/ -q` |
 | Determinism tests | 26 | `python -m pytest tests/test_determinism.py -q` |
-| Skeleton reduction, this repo's `src/` (14 files) | 57.9% (char) | `python docs/bench/bench.py` |
+| Skeleton reduction, this repo's `src/` (14 files) | 58.0% (char) | `python docs/bench/bench.py` |
 | Skeleton reduction, body-heavy code | 74.8–88.9% (char) | `PYTHONIOENCODING=utf-8 python -m pytest tests/test_benchmark.py::test_reduction_summary -s -o addopts=""` |
 | Skeleton reduction, synthetic 60-file project | 86.4% (`len/4` token proxy) | `PYTHONIOENCODING=utf-8 python -m pytest tests/test_integration.py -s -o addopts=""` |
 | Index throughput | ~50–60 files/sec (~17–20 ms/file), best of 3 | `python docs/bench/bench.py` |
@@ -170,7 +170,7 @@ The `cs` CLI is a console script (`pyproject.toml`). After `pip install -e .`:
 
 ```bash
 cd /path/to/your/project   # cs walks up from here to find the project's ledger.db
-cs repo-map --json | jq '.files[].path'
+cs repo-map --json | jq '.files[].file'
 ```
 
 From outside the project, pass `cs --db /path/to/your/project/ledger.db ...`

@@ -1,4 +1,4 @@
-<!-- reviewed-at: ce1da13 -->
+<!-- reviewed-at: 88af1bb -->
 <!-- covers: src/data/ledger.py, src/daemon/snapshot_writer.py -->
 
 # Data model

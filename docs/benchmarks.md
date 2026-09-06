@@ -63,7 +63,7 @@ languages are exercised only by fixtures in `tests/`, see §3):
 
 | File | Source chars | Skeleton chars | Reduction |
 |---|---|---|---|
-| `src/cli.py` | 4,115 | 1,148 | 72.1% |
+| `src/cli.py` | 5,840 | 1,809 | 69.0% |
 | `src/config.py` | 534 | 481 | 9.9% |
 | `src/core/inference.py` | 4,338 | 1,527 | 64.8% |
 | `src/core/registry.py` | 1,023 | 992 | 3.0% |
@@ -71,13 +71,13 @@ languages are exercised only by fixtures in `tests/`, see §3):
 | `src/daemon/heartbeat.py` | 2,243 | 1,467 | 34.6% |
 | `src/daemon/processor.py` | 10,107 | 4,241 | 58.0% |
 | `src/daemon/snapshot_writer.py` | 2,046 | 774 | 62.2% |
-| `src/daemon/watcher.py` | 7,511 | 3,809 | 49.3% |
+| `src/daemon/watcher.py` | 9,306 | 4,548 | 51.1% |
 | `src/data/ledger.py` | 8,823 | 4,124 | 53.3% |
 | `src/layers/json_api.py` | 7,655 | 2,370 | 69.0% |
 | `src/main.py` | 2,690 | 1,069 | 60.3% |
 | `src/mcp/scoring.py` | 2,039 | 1,283 | 37.1% |
 | `src/mcp/server.py` | 8,811 | 4,095 | 53.5% |
-| **AGGREGATE** | **75,897** | **31,943** | **57.9%** |
+| **AGGREGATE** | **79,417** | **33,343** | **58.0%** |
 
 **Reading this honestly:** Sieve's own source is *not* body-heavy — it is small
 functions with long docstrings, module-level constant tables (`registry.py`,
@@ -195,7 +195,7 @@ Supporting guarantees also enforced in the same file:
 |---|---|---|
 | 111 tests, ~1.9s | §1 | `python -m pytest tests/ -q` |
 | 26 determinism tests | §1 | `python -m pytest tests/test_determinism.py -q` |
-| 57.9% char reduction on `src/` | §2 | `python docs/bench/bench.py` |
+| 58.0% char reduction on `src/` | §2 | `python docs/bench/bench.py` |
 | 74.8–88.9% reduction on body-heavy code | §3 | `PYTHONIOENCODING=utf-8 python -m pytest tests/test_benchmark.py::test_reduction_summary -s -o addopts=""` |
 | 86.4% on the 60-file synthetic project | §3 | `PYTHONIOENCODING=utf-8 python -m pytest tests/test_integration.py -s -o addopts=""` |
 | ~50–60 files/sec indexing | §4 | `python docs/bench/bench.py` |
