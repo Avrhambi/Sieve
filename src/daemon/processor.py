@@ -37,6 +37,8 @@ _EXT_TO_LANG: dict[str, str] = {
     ".tsx": "typescript",
     ".md": "markdown",
     ".markdown": "markdown",
+    ".go": "go",
+    ".rs": "rust",
 }
 
 
