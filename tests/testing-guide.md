@@ -80,17 +80,20 @@ python3 -m pytest tests/ -v --tb=short
 | `test_mcp.py` | MCP scoring logic, keyword extraction, stemming (26) |
 | `test_json_api.py` | `cs` JSON output shape — skeleton, repo-map, diff (8) |
 | `test_benchmark.py` | Reduction + semantic preservation, 3 languages (7) |
-| `test_cli.py` | `cs` subcommand dispatch and JSON round-trip (5) |
+| `test_cli.py` | `cs` subcommand dispatch, JSON round-trip, ledger discovery (8) |
 | `test_snapshot_writer.py` | Commit-queue consumer writes structural snapshots (4) |
+| `test_watcher_commit.py` | Reflog-based commit detection; non-commit events ignored (4) |
 | `test_integration.py` | Token reduction >70% on a 60-file synthetic project (1) |
 
-Total: 104. Benchmark method and measured numbers: [`../docs/benchmarks.md`](../docs/benchmarks.md).
+Total: 111. Benchmark method and measured numbers: [`../docs/benchmarks.md`](../docs/benchmarks.md).
 
 ---
 
 ## CLI smoke tests
 
-Run these with the daemon online and the cache populated.
+Run these with the daemon online and the cache populated. `cs` finds the
+project's `ledger.db` by walking up from the current directory, so run these
+from inside `$PROJECT` (or pass `cs --db $PROJECT/ledger.db ...`).
 
 ### `cs repo-map`
 
@@ -180,7 +183,8 @@ Open a fresh Claude session (no prior context). Paste both files. Ask:
 | Rapid saves (10× in 2s) | Loop `touch file.py` | AST-hash gate fires; skeletonize/summarize run once |
 | File deleted while watching | `rm file.py` while daemon runs | No crash |
 | Gitignored file | Add to `.gitignore`, save it | Indexed as `is_ignored=1`, not processed |
-| `git commit --amend` | Amend a commit | Snapshot may lag by one commit (documented limitation) |
+| `git commit` / `--amend` | Commit or amend | Snapshot attaches to the new commit hash (reflog is read post-ref-move) |
+| `git checkout` / `reset` | Switch or move HEAD | No snapshot — only `commit` reflog entries trigger the writer |
 
 ---
 

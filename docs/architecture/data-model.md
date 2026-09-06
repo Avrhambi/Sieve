@@ -27,6 +27,9 @@ additive migration: if `symbol_index` lacks a `signature` column (checked via
 Module global `_DB_PATH` defaults to `<repo>/ledger.db`. `set_db_path(path)`
 rebinds it; `src/main.py` calls this at startup with `<root>/ledger.db`, and
 also sets `heartbeat._DB_PATH` separately (the two globals are independent).
+`src/cli.py` also calls it before dispatch, resolving the path via `--db` →
+`$SIEVE_DB` → walking up from the cwd for a `ledger.db` (the daemon writes it
+into the watched project, not the Sieve checkout).
 `Ledger(db_path=None)` falls back to the current `_DB_PATH`. Tests must call
 `set_db_path(tmp_path / "ledger.db")` per case. `_connect`'s own
 `db_path=_DB_PATH` default arg is bound at import and is effectively dead —

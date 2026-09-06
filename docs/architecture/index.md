@@ -22,7 +22,7 @@ byte-identical index (enforced by `tests/test_determinism.py`).
 | --- | --- |
 | `src/main.py` | Daemon entry point; wires the 4 async tasks, points the ledger + heartbeat at `<root>/ledger.db`, owns `_shutdown_event`. |
 | `src/config.py` | Loads `config/sieve.config.toml` into a pydantic `SieveConfig` (thresholds like `MAX_FILE_SIZE_KB`). |
-| `src/daemon/watcher.py` | `watchdog` observer thread; filters by extension + `.gitignore`; bridges sync events onto the asyncio file queue; detects commits via `.git/COMMIT_EDITMSG` → pushes short hash onto the commit queue. |
+| `src/daemon/watcher.py` | `watchdog` observer thread; filters by extension + `.gitignore`; bridges sync events onto the asyncio file queue; detects commits via the `.git/logs/HEAD` reflog (read after the ref moves, so the hash is the new commit) → pushes short hash onto the commit queue. |
 | `src/daemon/processor.py` | Consumes the file queue; AST-hash gate; runs skeletonize → summarize → extract-symbols; upserts `ledger` / `context_cache` / `symbol_index`. |
 | `src/daemon/snapshot_writer.py` | Consumes the commit queue; copies current `symbol_index` rows into `structural_snapshots` keyed by commit hash. |
 | `src/daemon/heartbeat.py` | Writes a liveness timestamp to `daemon_heartbeat` every 10 s; `read_heartbeat()` lets hooks detect a dead daemon. |
@@ -33,7 +33,7 @@ byte-identical index (enforced by `tests/test_determinism.py`).
 | `src/layers/json_api.py` | Read-side query layer: `get_file_skeleton_json`, `get_repo_map_json`, `get_diff_json` (signature changes vs the latest snapshot). |
 | `src/mcp/server.py` | MCP tools `sieve_find` (lexical search) and `sieve_file` (skeleton by path). |
 | `src/mcp/scoring.py` | Keyword/stem extraction and the `_score()` function used by `sieve_find`. |
-| `src/cli.py` | `cs` CLI: `skeleton`, `repo-map`, `diff` subcommands (text or `--json`). |
+| `src/cli.py` | `cs` CLI: `skeleton`, `repo-map`, `diff` subcommands (text or `--json`). Resolves the project's `ledger.db` at startup (`--db` flag → `$SIEVE_DB` → walk up from cwd) and calls `set_db_path` before dispatch; exits non-zero if none is found. |
 
 ## Data flow
 
@@ -65,7 +65,7 @@ byte-identical index (enforced by `tests/test_determinism.py`).
                          ▼                               ▼
                   cs CLI / json_api             MCP: sieve_find / sieve_file
 
-  git commit ─▶ watcher sees .git/COMMIT_EDITMSG ─▶ commit queue (asyncio.Queue[str])
+  git commit ─▶ watcher sees .git/logs/HEAD (reflog) ─▶ commit queue (asyncio.Queue[str])
              ─▶ snapshot_writer._write_snapshot(hash) ─▶ structural_snapshots
 ```
 

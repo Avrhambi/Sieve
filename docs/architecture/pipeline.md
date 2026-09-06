@@ -28,13 +28,18 @@ Shutdown: `_shutdown_event.wait()` returns → every task is `.cancel()`ed →
 `_SieveHandler` (a `watchdog.FileSystemEventHandler`) handles `on_modified` and
 `on_created` for files (not directories). For each event `_enqueue(src_path)`:
 
-1. **Commit signal.** If the path is `.git/COMMIT_EDITMSG`, read the current
-   commit hash by following `.git/HEAD` → `.git/refs/heads/<branch>` (or a
-   detached HEAD literal), take the first 12 chars, and
-   `call_soon_threadsafe(commit_queue.put_nowait, hash)`. Then return — commit
-   files never enter the file queue. Caveat: on `git commit --amend`,
-   `COMMIT_EDITMSG` is rewritten *before* `HEAD` moves, so the snapshot can
-   briefly attach to the previous hash.
+1. **Commit signal.** If the path is `.git/logs/HEAD` (the reflog), read its
+   last line — git appends it *after* the ref moves, format
+   `<old> <new> <ident> <ts> <tz>\t<message>`. If `<message>` starts with
+   `commit` (covers `commit:`, `commit (initial):`, `commit (amend):`), take
+   field 2 (`<new>`), truncate to 12 chars, and
+   `call_soon_threadsafe(commit_queue.put_nowait, hash)`. Non-commit reflog
+   entries (`checkout:`, `reset:`, `merge …`) are ignored. Then return — the
+   reflog never enters the file queue. Because the reflog is written post-move,
+   the hash is always the new commit (the old `COMMIT_EDITMSG` off-by-one,
+   `--amend` included, is resolved). Fallback: if `.git/logs/HEAD` can't be
+   read (`core.logAllRefUpdates=false`), follow `.git/HEAD` →
+   `.git/refs/heads/<branch>` instead, where the race can still occur.
 2. **Extension filter.** `path.suffix.lower()` must be in `_SUPPORTED_EXTS`
    (`.py .js .ts .jsx .tsx .go .rs .md .markdown`).
 3. **Gitignore filter.** `_is_ignored(path, root, patterns)` — see below.
@@ -140,7 +145,7 @@ No step touches the network, the clock, a subprocess, or a random source.
 
 ## The commit-queue path
 
-`git commit` rewrites `.git/COMMIT_EDITMSG` → watcher pushes the 12-char hash →
+`git commit` appends to `.git/logs/HEAD` → watcher pushes the new 12-char hash →
 `start_snapshot_writer` pops it → `_write_snapshot(commit_hash)`:
 
 ```

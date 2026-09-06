@@ -13,14 +13,43 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
+from src.data.ledger import set_db_path
 from src.layers.json_api import (
     get_diff_json,
     get_file_skeleton_json,
     get_repo_map_json,
 )
+
+
+def _resolve_db_path(explicit: str | None) -> Path:
+    """Resolve the ledger.db path the daemon wrote for the watched project.
+
+    Order: ``--db`` flag, then ``$SIEVE_DB``, then the first ``ledger.db``
+    found walking up from the cwd but not past the enclosing git repo root,
+    else ``<cwd>/ledger.db`` (which will not exist and triggers the
+    "run the daemon first" error).
+
+    The walk stops at the directory containing ``.git`` so a stray
+    ``ledger.db`` in a parent directory (e.g. the home dir) can never bind an
+    unrelated project's CLI to the wrong index.
+    """
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    env = os.environ.get("SIEVE_DB")
+    if env:
+        return Path(env).expanduser().resolve()
+    cwd = Path.cwd().resolve()
+    for parent in (cwd, *cwd.parents):
+        candidate = parent / "ledger.db"
+        if candidate.is_file():
+            return candidate
+        if (parent / ".git").exists():
+            break  # don't look above the repo root
+    return cwd / "ledger.db"
 
 
 def _print_skeleton_text(payload: dict) -> None:
@@ -72,6 +101,13 @@ def _emit(payload: dict, as_json: bool, text_fn) -> None:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cs", description="Sieve structured outputs")
+    parser.add_argument(
+        "--db",
+        metavar="PATH",
+        default=None,
+        help="path to the project's ledger.db (default: discovered by walking "
+        "up from the current directory, or $SIEVE_DB)",
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     sk = sub.add_parser("skeleton", help="per-file skeleton + dependencies")
@@ -90,6 +126,17 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+
+    db_path = _resolve_db_path(args.db)
+    if not db_path.is_file():
+        print(
+            f"cs: ledger not found: {db_path}\n"
+            "Run the daemon first (python src/main.py <project-path>), or point "
+            "cs at it with --db <path-to-ledger.db>.",
+            file=sys.stderr,
+        )
+        return 1
+    set_db_path(db_path)
 
     if args.cmd == "skeleton":
         target = Path(args.file).resolve()

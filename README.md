@@ -61,7 +61,7 @@ The cost: search is lexical (see [Trade-offs](#design-trade-offs)).
                          ▼                               ▼
                   cs CLI / json_api             MCP: sieve_find / sieve_file
 
-  git commit ─▶ watcher sees .git/COMMIT_EDITMSG ─▶ commit queue
+  git commit ─▶ watcher sees .git/logs/HEAD (reflog) ─▶ commit queue
              ─▶ snapshot_writer copies symbol_index → structural_snapshots (keyed by hash)
 ```
 
@@ -69,7 +69,7 @@ The cost: search is lexical (see [Trade-offs](#design-trade-offs)).
 |---|---|
 | `src/main.py` | Daemon entry point; wires 4 async tasks, points the ledger at `<root>/ledger.db`. |
 | `src/config.py` | Loads `config/sieve.config.toml` → pydantic `SieveConfig`. |
-| `src/daemon/watcher.py` | `watchdog` observer; extension + `.gitignore` filter; commit detection via `.git/COMMIT_EDITMSG`. |
+| `src/daemon/watcher.py` | `watchdog` observer; extension + `.gitignore` filter; commit detection via the `.git/logs/HEAD` reflog (post-ref-move, so the hash is correct). |
 | `src/daemon/processor.py` | Queue consumer; AST-hash gate; `skeletonize → summarize → extract-symbols`; SQLite upserts. |
 | `src/daemon/snapshot_writer.py` | On each commit hash, freezes current signatures into `structural_snapshots`. |
 | `src/daemon/heartbeat.py` | Liveness timestamp every 10s so hooks can detect a dead daemon. |
@@ -114,7 +114,7 @@ Detailed design: [`docs/architecture/`](docs/architecture/) — `index.md` (map)
 
 ## Testing & resilience
 
-**`python -m pytest tests/ -q` → `104 passed` in ~1.8s.** (Windows 11, Python 3.14.)
+**`python -m pytest tests/ -q` → `111 passed` in ~1.9s.** (Windows 11, Python 3.14.)
 
 - **Determinism suite** (`tests/test_determinism.py`, 26 tests — 25% of the
   suite). Runs the real pipeline over a multi-file project, dumps
@@ -142,7 +142,7 @@ counts** (`len()` on text) — a proxy for token savings, not a tokenizer count.
 
 | Metric | Value | Reproduce |
 |---|---|---|
-| Test suite | 104 passed, ~1.8s | `python -m pytest tests/ -q` |
+| Test suite | 111 passed, ~1.9s | `python -m pytest tests/ -q` |
 | Determinism tests | 26 | `python -m pytest tests/test_determinism.py -q` |
 | Skeleton reduction, this repo's `src/` (14 files) | 57.9% (char) | `python docs/bench/bench.py` |
 | Skeleton reduction, body-heavy code | 74.8–88.9% (char) | `PYTHONIOENCODING=utf-8 python -m pytest tests/test_benchmark.py::test_reduction_summary -s -o addopts=""` |
@@ -169,9 +169,13 @@ python src/main.py /path/to/your/project
 The `cs` CLI is a console script (`pyproject.toml`). After `pip install -e .`:
 
 ```bash
-cd /path/to/your/project
+cd /path/to/your/project   # cs walks up from here to find the project's ledger.db
 cs repo-map --json | jq '.files[].path'
 ```
+
+From outside the project, pass `cs --db /path/to/your/project/ledger.db ...`
+(or set `$SIEVE_DB`). If no ledger is found, `cs` exits non-zero and tells you
+to start the daemon.
 
 ## CLI
 
@@ -226,8 +230,11 @@ directly — no daemon call.
 - **JS/TS signatures are `NULL`; Go/Rust have no symbols.** `cs repo-map` /
   `cs diff` are Python-only.
 - **No startup backfill** — only files changed while the daemon runs get indexed.
-- **`git commit --amend` race.** `COMMIT_EDITMSG` is rewritten before `HEAD`
-  moves, so a snapshot taken mid-amend can attach to the previous hash.
+- **Commit snapshots need the reflog.** Detection reads `.git/logs/HEAD`,
+  which git appends *after* the ref moves — so the snapshot always attaches to
+  the new commit (the old `COMMIT_EDITMSG` off-by-one, including on `--amend`,
+  is resolved). A repo with `core.logAllRefUpdates=false` has no reflog; the
+  watcher falls back to reading `HEAD` directly and the old race reappears.
 
 ## Roadmap
 

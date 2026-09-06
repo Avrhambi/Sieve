@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import logging
+import time
 from pathlib import Path
 
 from watchdog.events import (
@@ -32,6 +33,11 @@ _SUPPORTED_EXTS: frozenset[str] = frozenset(
 # Module-level queues shared with processor.py and snapshot_writer.py.
 _file_queue: asyncio.Queue[Path] = asyncio.Queue()
 _commit_queue: asyncio.Queue[str] = asyncio.Queue()
+
+
+def _looks_like_sha(token: str) -> bool:
+    """True if *token* is a full git object hash (40 hex, or 64 for sha256)."""
+    return len(token) in (40, 64) and all(c in "0123456789abcdef" for c in token)
 
 
 def get_queue() -> asyncio.Queue[Path]:
@@ -124,9 +130,9 @@ class _SieveHandler(FileSystemEventHandler):
     def _read_head(self) -> str | None:
         """Return the first 12 chars of the current commit hash, or None.
 
-        Follows .git/HEAD → .git/refs/heads/<branch>. On `git commit --amend`,
-        COMMIT_EDITMSG fires before HEAD updates, so this may briefly return
-        the previous commit; acceptable for v1 snapshots.
+        Follows .git/HEAD → .git/refs/heads/<branch>. Used only as a fallback
+        when the reflog (.git/logs/HEAD) is unavailable — e.g. a repo with
+        core.logAllRefUpdates=false.
         """
         try:
             head_text = (self._root / ".git" / "HEAD").read_text().strip()
@@ -137,17 +143,53 @@ class _SieveHandler(FileSystemEventHandler):
         except OSError:
             return None
 
+    def _read_commit_from_reflog(self) -> str | None:
+        """Return the short hash of the commit just recorded in .git/logs/HEAD.
+
+        Git appends the reflog line *after* the ref moves, so the last line
+        carries the new commit hash — unlike COMMIT_EDITMSG, which git writes
+        *before* moving the ref (the old off-by-one race). Returns None for
+        non-commit reflog entries (checkout / reset / merge) so they don't
+        enqueue a snapshot. Falls back to ``_read_head()`` only when the
+        reflog file cannot be read (core.logAllRefUpdates=false).
+        """
+        logpath = self._root / ".git" / "logs" / "HEAD"
+        for _ in range(2):
+            try:
+                text = logpath.read_text(errors="ignore")
+            except OSError:
+                return self._read_head()
+            lines = text.splitlines()
+            if not lines:
+                return self._read_head()
+            old_new, _, message = lines[-1].partition("\t")
+            fields = old_new.split()
+            complete = (
+                text.endswith("\n")
+                and len(fields) >= 2
+                and _looks_like_sha(fields[1])
+            )
+            if not complete:
+                time.sleep(0.05)  # partial line — let git finish the write
+                continue
+            if not message.startswith("commit"):
+                return None
+            return fields[1][:12]
+        return None
+
     def _enqueue(self, src_path: str) -> None:
         path = Path(src_path)
 
-        # Commit signal: COMMIT_EDITMSG is rewritten by git on every commit.
+        # Commit signal: git appends to .git/logs/HEAD after the ref moves.
         # Name-check before extension filter (this file has no suffix).
+        # parts[-2] == "logs" also excludes .git/logs/refs/heads/<branch>.
         if (
-            path.name == "COMMIT_EDITMSG"
-            and len(path.parts) >= 2
-            and path.parts[-2] == ".git"
+            path.name == "HEAD"
+            and len(path.parts) >= 3
+            and path.parts[-2] == "logs"
+            and path.parts[-3] == ".git"
         ):
-            commit_hash = self._read_head()
+            commit_hash = self._read_commit_from_reflog()
             if commit_hash:
                 logger.debug("Commit detected: %s", commit_hash)
                 self._loop.call_soon_threadsafe(

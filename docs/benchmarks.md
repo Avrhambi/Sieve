@@ -27,7 +27,7 @@ the raw result, and the environment it was taken on. Every quantitative claim in
 python -m pytest tests/ -q
 ```
 
-**Result:** `104 passed in ~1.8s` (1.84s / 1.79s across runs).
+**Result:** `111 passed in ~1.9s` (1.9s/1.8s/2.1s across runs).
 
 **Per-file breakdown** (`for f in tests/test_*.py; do python -m pytest "$f" -q; done`).
 The per-file wall times sum to more than the whole-suite total because each
@@ -40,11 +40,12 @@ separate `pytest` invocation re-pays interpreter startup and tree-sitter import:
 | `test_mcp.py` | 26 | 0.04s | `sieve_find` scoring, keyword/stem extraction, silence gate |
 | `test_json_api.py` | 8 | 0.51s | `cs` JSON shape — skeleton, repo-map, diff |
 | `test_benchmark.py` | 7 | 0.51s | Reduction ≥70% + semantic preservation, 3 languages (see §3) |
-| `test_cli.py` | 5 | 0.42s | `cs` dispatch + JSON round-trip |
+| `test_cli.py` | 8 | 0.42s | `cs` dispatch, JSON round-trip, ledger discovery (`--db` / `$SIEVE_DB` / walk-up) |
 | `test_snapshot_writer.py` | 4 | 0.29s | Commit-queue consumer → `structural_snapshots` |
+| `test_watcher_commit.py` | 4 | 0.30s | Reflog-based commit detection; checkout/reset events ignored |
 | `test_integration.py` | 1 | 0.52s | Reduction >70% on a synthetic 60-file project (see §3) |
 
-**26 of 104 tests (25%) are determinism tests** — the largest single group.
+**26 of 111 tests (23%) are determinism tests** — the largest single group.
 
 ---
 
@@ -192,7 +193,7 @@ Supporting guarantees also enforced in the same file:
 
 | README claim | Source | Command |
 |---|---|---|
-| 104 tests, ~1.8s | §1 | `python -m pytest tests/ -q` |
+| 111 tests, ~1.9s | §1 | `python -m pytest tests/ -q` |
 | 26 determinism tests | §1 | `python -m pytest tests/test_determinism.py -q` |
 | 57.9% char reduction on `src/` | §2 | `python docs/bench/bench.py` |
 | 74.8–88.9% reduction on body-heavy code | §3 | `PYTHONIOENCODING=utf-8 python -m pytest tests/test_benchmark.py::test_reduction_summary -s -o addopts=""` |
