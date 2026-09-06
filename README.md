@@ -20,17 +20,6 @@ files. Measured on this repo's own source, a skeleton is **58% smaller** than th
 file (character count); on body-heavy code it reaches **74.8–88.9%** — see
 [`docs/benchmarks.md`](docs/benchmarks.md).
 
-**Why deterministic rather than an embedding / LLM index:**
-
-- **Reproducible** — CI can assert the index byte-for-byte; a regression in the
-  skeletonizer is a failed test, not a vibe.
-- **Cacheable** — an AST-structure hash gates re-processing: comment- and
-  whitespace-only edits are free.
-- **No GPU, no API key, no rate limit** — every stage is a pure function of the
-  input bytes.
-- **Testable** — pure functions with fixture inputs, not a model to evaluate.
-
-The cost: search is lexical (see [Trade-offs](#design-trade-offs)).
 
 ## Architecture
 
