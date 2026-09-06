@@ -10,8 +10,9 @@ from src.data.ledger import Ledger, set_db_path
 
 
 @pytest.fixture
-def ledger(tmp_path):
+def ledger(tmp_path, monkeypatch):
     set_db_path(tmp_path / "ledger.db")
+    monkeypatch.setenv("SIEVE_DB", str(tmp_path / "ledger.db"))
     yield tmp_path
 
 
@@ -54,8 +55,47 @@ class TestCli:
         assert names == ["_private", "alpha"]
 
     def test_skeleton_unindexed_file_returns_nonzero(self, ledger):
+        _seed_basic(ledger)  # ledger exists; missing.py is simply not in it
         rc, _ = _capture(["skeleton", "missing.py", "--json"])
         assert rc == 1
+
+    def test_db_flag_overrides_discovery(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("SIEVE_DB", raising=False)
+        dbfile = tmp_path / "custom-ledger.db"
+        set_db_path(dbfile)
+        f = tmp_path / "bar.py"
+        with Ledger() as l:
+            l.upsert_file(str(f), 1.0, "h", is_ignored=False)
+            l.upsert_cache(str(f), "skel", "sum")
+            l.upsert_symbol("gamma", str(f), ["json"], "def gamma()")
+        monkeypatch.chdir(tmp_path)  # no ledger.db here — discovery would miss
+        rc, out = _capture(["--db", str(dbfile), "repo-map", "--json"])
+        assert rc == 0
+        payload = json.loads(out)
+        assert [s["name"] for s in payload["files"][0]["public_interface"]] == ["gamma"]
+
+    def test_cwd_walk_up_discovers_ledger(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("SIEVE_DB", raising=False)
+        set_db_path(tmp_path / "ledger.db")
+        f = tmp_path / "baz.py"
+        with Ledger() as l:
+            l.upsert_file(str(f), 1.0, "h", is_ignored=False)
+            l.upsert_cache(str(f), "skel", "sum")
+            l.upsert_symbol("delta", str(f), ["json"], "def delta()")
+        nested = tmp_path / "sub" / "dir"
+        nested.mkdir(parents=True)
+        monkeypatch.chdir(nested)
+        rc, out = _capture(["skeleton", str(f), "--json"])
+        assert rc == 0
+        assert json.loads(out)["skeleton"] == "skel"
+
+    def test_missing_ledger_exits_nonzero_without_creating_db(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.delenv("SIEVE_DB", raising=False)
+        monkeypatch.chdir(tmp_path)
+        rc = main(["repo-map", "--json"])
+        assert rc == 1
+        assert "ledger not found" in capsys.readouterr().err
+        assert not (tmp_path / "ledger.db").exists()
 
     def test_diff_no_snapshots_succeeds_with_error_field(self, ledger):
         _seed_basic(ledger)

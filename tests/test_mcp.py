@@ -1,64 +1,19 @@
-"""Unit tests for src.mcp.server scoring and keyword logic.
+"""Unit tests for src.mcp.scoring keyword and scoring logic.
 
 Imports the pure helper functions directly, bypassing the FastMCP/ledger
 import chain so tests run without a live daemon or mcp package installed.
 """
-import re
-import sys
-from pathlib import Path
-
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-
-# ---------------------------------------------------------------------------
-# Replicate the pure helpers locally so tests don't need FastMCP installed.
-# These are copied verbatim from src/mcp/server.py — if server.py changes,
-# update here too and add a test that catches the divergence.
-# ---------------------------------------------------------------------------
-
-_STOP_WORDS = frozenset({
-    "a", "an", "the", "and", "or", "in", "of", "to", "for", "is", "are",
-    "was", "be", "on", "at", "by", "do", "it", "this", "that", "with",
-    "from", "how", "what", "where", "when", "why", "would", "could",
-    "should", "can", "i", "you", "we", "my", "your", "me", "us",
-})
-_STEM_SUFFIXES = ("ing", "er", "ers", "ed", "ion", "ions", "or", "ors", "ly", "ive", "tion")
-_SKIP_DIRS = frozenset({"tests", "test", "docs", "doc", "__pycache__"})
-
-
-def _stem(word: str) -> str:
-    for suffix in _STEM_SUFFIXES:
-        if word.endswith(suffix) and len(word) - len(suffix) >= 3:
-            return word[: -len(suffix)]
-    return word
-
-
-def _keywords(query: str) -> set:
-    tokens = re.findall(r"[A-Za-z_]\w*", query)
-    result: set = set()
-    for t in tokens:
-        low = t.lower()
-        if len(low) > 2 and low not in _STOP_WORDS:
-            result.add(low)
-            result.add(_stem(low))
-    return result
-
-
-def _should_skip(path: str) -> bool:
-    parts = path.replace("\\", "/").split("/")
-    return any(p in _SKIP_DIRS for p in parts)
-
-
-def _score(path: str, symbols: list, keywords: set) -> float:
-    score = 0.0
-    name = Path(path).stem.lower()
-    if name in keywords or _stem(name) in keywords:
-        score += 3.0
-    for sym in symbols:
-        if sym.lower() in keywords:
-            score += 2.0
-    return score
+from src.mcp.scoring import (
+    _STOP_WORDS,
+    _STEM_SUFFIXES,
+    _SKIP_DIRS,
+    _stem,
+    _keywords,
+    _should_skip,
+    _score,
+)
 
 
 # ---------------------------------------------------------------------------

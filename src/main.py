@@ -11,30 +11,15 @@ _repo_root = Path(__file__).resolve().parent.parent
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
-import toml
-from pydantic import BaseModel
+# Re-exported from src.config so existing callers importing these from
+# src.main keep working.
+from src.config import CONFIG_PATH, SieveConfig, SieveThresholds, load_config
 
 logger = logging.getLogger(__name__)
 
-CONFIG_PATH = Path(__file__).parent.parent / "config" / "sieve.config.toml"
+__all__ = ["CONFIG_PATH", "SieveConfig", "SieveThresholds", "load_config", "start"]
 
 _shutdown_event: asyncio.Event | None = None
-
-
-class SieveThresholds(BaseModel):
-    VRAM_THRESHOLD_MB: int
-    RAM_THRESHOLD_MB: int
-    MAX_FILE_SIZE_KB: int
-    OLLAMA_NUM_PARALLEL: int
-
-
-class SieveConfig(BaseModel):
-    thresholds: SieveThresholds
-
-
-def load_config(path: Path = CONFIG_PATH) -> SieveConfig:
-    raw = toml.load(str(path))
-    return SieveConfig(**raw)
 
 
 async def start(root: Path) -> None:

@@ -55,7 +55,6 @@ python -m pip install --quiet --upgrade pip
 python -m pip install --quiet \
     "toml>=0.10" \
     "pydantic>=2.0" \
-    "aiohttp>=3.9" \
     "watchdog>=4.0" \
     "tree-sitter>=0.25" \
     "tree-sitter-python>=0.23" \
@@ -66,33 +65,6 @@ python -m pip install --quiet \
     "tree-sitter-rust>=0.23" \
     "mcp>=1.0"
 echo "    Core dependencies installed"
-
-echo "==> Checking Ollama..."
-# On Windows, Ollama is a system tray app and may not be on Git Bash PATH.
-# Check PATH first, then common Windows install locations.
-OLLAMA_CMD=""
-if command -v ollama &>/dev/null; then
-    OLLAMA_CMD="ollama"
-elif [ -f "$LOCALAPPDATA/Programs/Ollama/ollama.exe" ]; then
-    OLLAMA_CMD="$LOCALAPPDATA/Programs/Ollama/ollama.exe"
-elif [ -f "/c/Users/$USERNAME/AppData/Local/Programs/Ollama/ollama.exe" ]; then
-    OLLAMA_CMD="/c/Users/$USERNAME/AppData/Local/Programs/Ollama/ollama.exe"
-fi
-
-if [ -z "$OLLAMA_CMD" ]; then
-    echo "    WARN: Ollama not found — LLM summaries will use heuristic fallback."
-    echo "         Install from https://ollama.com/download for full functionality."
-else
-    echo "    Ollama found: $OLLAMA_CMD"
-    echo "==> Pulling model qwen2.5-coder:1.5b (this may take a few minutes)..."
-    "$OLLAMA_CMD" pull qwen2.5-coder:1.5b
-    echo "Verifying Ollama model..."
-    if "$OLLAMA_CMD" run qwen2.5-coder:1.5b "ping" 2>&1 | grep -q "."; then
-        echo "    Model OK"
-    else
-        echo "    WARN: Model verification failed — re-run install.sh to retry."
-    fi
-fi
 
 echo "==> Initialising SQLite WAL database..."
 PYTHONPATH="$REPO_ROOT" $PY -c "

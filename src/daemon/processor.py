@@ -4,32 +4,28 @@ Key guarantees
 --------------
 * **AST-hash gate**: ``summarize()`` is called only when the file's AST
   structure changes.  Whitespace-only or comment-only edits leave the hash
-  unchanged → no LLM round-trip.
-* **Resource governors**: If available RAM or VRAM drops below the thresholds
-  in ``sieve.config.toml``, processing pauses (``asyncio.sleep``) until
-  resources recover.  The hook is never blocked — all work is async.
+  unchanged → no re-summary.
+* **Deterministic pipeline**: ``summarize()`` is pure and synchronous — there
+  are no resource governors and no LLM/network round-trips.
 """
 from __future__ import annotations
 
 import ast
 import asyncio
 import hashlib
-import json
 import logging
 import re
-import subprocess
 from pathlib import Path
 
+from src.config import load_config
 from src.core.skeletonizer import skeletonize
 from src.core.inference import summarize
 from src.data.ledger import Ledger, LedgerError
 import src.main as _main_module
 from src.daemon.watcher import get_queue, _load_gitignore_patterns, _is_ignored
-from src.main import load_config
 
 logger = logging.getLogger(__name__)
 
-_RESOURCE_POLL_INTERVAL: float = 5.0   # seconds to sleep while resources are low
 _QUEUE_TIMEOUT: float = 1.0            # seconds to wait on an empty queue
 
 # Maps file extension → language string used by skeletonizer / summarize.
@@ -41,49 +37,9 @@ _EXT_TO_LANG: dict[str, str] = {
     ".tsx": "typescript",
     ".md": "markdown",
     ".markdown": "markdown",
+    ".go": "go",
+    ".rs": "rust",
 }
-
-
-# ---------------------------------------------------------------------------
-# Resource helpers (self-contained to avoid importing private inference symbols)
-# ---------------------------------------------------------------------------
-
-def _available_ram_mb() -> int:
-    """Return available RAM in MB from /proc/meminfo (Linux)."""
-    try:
-        with open("/proc/meminfo") as fh:
-            for line in fh:
-                if line.startswith("MemAvailable:"):
-                    return int(line.split()[1]) // 1024
-    except OSError:
-        pass
-    return 999_999
-
-
-def _available_vram_mb() -> int:
-    """Return free VRAM in MB via nvidia-smi; 999_999 if no GPU present."""
-    try:
-        out = subprocess.check_output(
-            ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
-            timeout=3,
-            stderr=subprocess.DEVNULL,
-        )
-        values = [int(v.strip()) for v in out.decode().splitlines() if v.strip()]
-        return max(values) if values else 999_999
-    except Exception:
-        return 999_999
-
-
-def _resources_ok() -> bool:
-    """Return True when both RAM and VRAM are above configured thresholds."""
-    config = load_config()
-    if _available_vram_mb() < config.thresholds.VRAM_THRESHOLD_MB:
-        logger.debug("VRAM below threshold — processor will pause")
-        return False
-    if _available_ram_mb() < config.thresholds.RAM_THRESHOLD_MB:
-        logger.debug("RAM below threshold — processor will pause")
-        return False
-    return True
 
 
 # ---------------------------------------------------------------------------
@@ -203,10 +159,9 @@ async def process_file(path: Path, queue: asyncio.Queue) -> None:
 
     1. File gone or extension not supported → skip.
     2. File matches gitignore patterns → mark ignored in ledger, skip.
-    3. Resources below threshold → re-enqueue after delay.
-    4. File exceeds ``MAX_FILE_SIZE_KB`` → skip.
-    5. AST hash unchanged → upsert mtime only, skip ``summarize()``.
-    6. AST hash changed (or new file) → skeletonize + summarize + symbols, upsert all.
+    3. File exceeds ``MAX_FILE_SIZE_KB`` → skip.
+    4. AST hash unchanged → upsert mtime only, skip ``summarize()``.
+    5. AST hash changed (or new file) → skeletonize + summarize + symbols, upsert all.
     """
     ext = path.suffix.lower()
     lang = _EXT_TO_LANG.get(ext)
@@ -235,12 +190,6 @@ async def process_file(path: Path, queue: asyncio.Queue) -> None:
 
     config = load_config()
 
-    if not _resources_ok():
-        logger.info("Resources below threshold — re-enqueuing %s", path)
-        await asyncio.sleep(5)
-        await queue.put(path)
-        return
-
     try:
         source = path.read_bytes()
     except OSError as exc:
@@ -263,14 +212,14 @@ async def process_file(path: Path, queue: asyncio.Queue) -> None:
             existing = ledger.get_file(path_str)
 
             if existing and existing["ast_hash"] == ast_hash:
-                # Structure unchanged — refresh mtime, skip LLM call.
+                # Structure unchanged — refresh mtime, skip re-skeletonize.
                 ledger.upsert_file(path_str, mtime, ast_hash)
                 logger.debug("AST unchanged — no re-summary: %s", path)
                 return
 
             # New file or structural change — full pipeline.
             skeleton = skeletonize(source, lang)
-            summary = await summarize(source.decode("utf-8", errors="replace"), lang)
+            summary = summarize(source.decode("utf-8", errors="replace"), lang)
 
             ledger.upsert_file(path_str, mtime, ast_hash)
             ledger.upsert_cache(path_str, skeleton, summary)
@@ -293,9 +242,8 @@ async def process_file(path: Path, queue: asyncio.Queue) -> None:
 async def start_processor(root: Path) -> None:
     """Consume the watcher queue and process each changed file.
 
-    Pauses via ``asyncio.sleep`` when RAM or VRAM is below the configured
-    thresholds, resuming automatically once resources recover.  Loads gitignore
-    patterns from *root* at startup.  Exits cleanly when a shutdown event is set.
+    Loads gitignore patterns from *root* at startup.  Exits cleanly when a
+    shutdown event is set.
     """
     global _gitignore_patterns, _repo_root
     _repo_root = root
@@ -312,14 +260,6 @@ async def start_processor(root: Path) -> None:
         if _main_module._shutdown_event and _main_module._shutdown_event.is_set():
             logger.info("Shutdown signal received — processor exiting")
             break
-
-        # Resource gate — back-off before touching the queue.
-        while not _resources_ok():
-            logger.info(
-                "Resources below threshold — processor sleeping %.0fs",
-                _RESOURCE_POLL_INTERVAL,
-            )
-            await asyncio.sleep(_RESOURCE_POLL_INTERVAL)
 
         try:
             path = await asyncio.wait_for(queue.get(), timeout=_QUEUE_TIMEOUT)
